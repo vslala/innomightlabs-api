@@ -43,7 +43,8 @@ async def ask_chatbot(
     async def response_streamer():
         async for chunk in agentic_workflow.run():
             if chunk["step"] == StreamStep.THIKING:
-                print(f"Thinking.... {chunk['content']}")
+                response = AgentStreamResponse(content=chunk["content"], step=chunk["step"])
+                yield f"data: {response.model_dump_json()}\n\n"
             else:
                 response = AgentStreamResponse(content=chunk["content"], step=chunk["step"])
                 yield f"data: {response.model_dump_json()}\n\n"

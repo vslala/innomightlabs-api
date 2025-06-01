@@ -24,7 +24,7 @@ class BaseChatbot(ABC):
 
 class GeminiChatbot(BaseChatbot):
     def __init__(self, model_name: str = "gemini-2.0-flash", temperature: float = 0):
-        self.llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature, streaming=True)
+        self.llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
 
     async def get_text_response_async(self, prompt: str) -> Union[str, list[Union[str, dict[Any, Any]]]]:
         response = await self.llm.ainvoke(prompt)

@@ -65,7 +65,7 @@ class AgenticWorkflow:
     async def _finalize_answer(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Finalize the answer based on the given chain of thoughts."""
 
-        async for chunk in self.chatbot.stream_response(f"{state.get('scratchpad', '')}\n\n Based on the above chain of thoughts, please provide a clear and concise answer to the user's question."):
+        async for chunk in self.chatbot.stream_response(f"{state.get('scratchpad', '')}\n\n Based on the above chain of thoughts, please provide a clear and concise answer to the user's question in markdown format."):
             state["agent_message"] += str(chunk)
             await self.state["stream_queue"].put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE))
             yield state

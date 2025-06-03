@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from controllers import chatbot_controller
+from app.workflows import chatbot_controller
+from app.common.config import ALL_CONTROLLERS
 
 app = FastAPI()
 
@@ -17,4 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router=chatbot_controller.router, tags=["chatbot"])
+for controller in ALL_CONTROLLERS:
+    app.include_router(controller().router)
+    

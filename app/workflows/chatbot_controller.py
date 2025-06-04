@@ -2,24 +2,24 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
-from app.common.components.chatbot import BaseChatbot, ChatbotFactory
+from app.workflows.chatbot import BaseChatbot
+from app.common.config import ChatbotFactory
 from app.common.controller import BaseController
+from app.common.models import RequestHeaders
 from app.workflows.chat_agent_workflow import AgenticWorkflow
 from app.workflows.models import AgentRequest, AgentState, AgentStreamResponse, StreamStep
 
 
-
 class AgentController(BaseController):
     prefix = "chatbot"
-    
+
     @property
     def router(self) -> APIRouter:
         """
         Returns the APIRouter instance for the AgentController.
         This method defines the routes for the chatbot API.
         """
-        
-        
+
         @self.api_router.post(
             "/ask",
             response_class=StreamingResponse,
@@ -33,6 +33,7 @@ class AgentController(BaseController):
         )
         async def ask_chatbot(
             request: AgentRequest,
+            headers: Annotated[RequestHeaders, Header()],
             chatbot: BaseChatbot = Depends(lambda: ChatbotFactory.create_chatbot("google", "gemini-2.0-flash")),
         ) -> StreamingResponse:
             """
@@ -58,6 +59,5 @@ class AgentController(BaseController):
                         yield f"data: {response.model_dump_json()}\n\n"
 
             return StreamingResponse(response_streamer(), media_type="text/event-stream")
-        
-        return self.api_router
 
+        return self.api_router

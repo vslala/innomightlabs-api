@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.workflows import chatbot_controller
-from app.common.config import ALL_CONTROLLERS
+import uvicorn
+from app.common.middlewares import UserPopulationMiddleware
+from app.common import get_controllers
 
 app = FastAPI()
 
@@ -17,7 +18,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(UserPopulationMiddleware)
 
-for controller in ALL_CONTROLLERS:
+for controller in get_controllers():
     app.include_router(controller().router)
-    
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

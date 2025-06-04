@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - feature/*
+  pull_request:
+    branches:
+      - main
+        
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+    env:
+      # These will be available to all steps!
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
+      POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+      # Secrets
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      
+      - name: Debug environment
+        run: | 
+          env | grep POSTGRES
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Install Docker Compose
+        run: sudo apt-get update && sudo apt-get install -y docker-compose
+
+      - name: Start Docker Compose (DB)
+        run: docker-compose up -d db
+
+      - name: Wait for DB to be ready
+        run: |
+          for i in {1..30}; do
+            docker-compose exec db pg_isready -U $POSTGRES_USER && break
+            echo "Waiting for postgres db to be ready..."
+            sleep 2
+          done
+
+      - name: Install project dependencies
+        run: uv pip install --system .
+
+      - name: Install Ruff
+        run: uv pip install --system ruff
+
+      - name: Lint with Ruff
+        run: ruff check .
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Install Uvicorn
+        run: uv pip install --system uvicorn
+
+      - name: Start FastAPI (background) & health check
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          sleep 5
+          curl -f http://127.0.0.1:8000/docs || exit 1

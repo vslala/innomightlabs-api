@@ -34,9 +34,3 @@ class GeminiChatbot(BaseChatbot):
         stream_response = self.llm.astream(prompt)
         async for chunk in stream_response:
             yield chunk.content
-
-
-class ChatbotFactory:
-    @staticmethod
-    def create_chatbot(owner: str, model_name: str, temperature: float = 0.0) -> BaseChatbot:
-        return GeminiChatbot(model_name=model_name, temperature=temperature)

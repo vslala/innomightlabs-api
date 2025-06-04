@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncGenerator
 from langgraph.graph import StateGraph, START, END
 
-from app.common.components.chatbot import BaseChatbot, ChatbotFactory
+from app.workflows.chatbot import BaseChatbot
 from app.workflows.models import AgentState, StreamChunk, StreamStep
 
 
@@ -12,7 +12,7 @@ class AgenticWorkflow:
     def __init__(
         self,
         state: AgentState,
-        chatbot: BaseChatbot = ChatbotFactory.create_chatbot("google", "gemini-2.0-flash"),
+        chatbot: BaseChatbot,
     ):
         self.state = state
         self.chatbot = chatbot

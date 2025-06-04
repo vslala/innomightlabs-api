@@ -1,10 +1,8 @@
 from uuid import uuid4
 from pydantic import BaseModel
 
-from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from app.workflows.models import StreamStep
 
 UUID_FIELD = Field(
     description="Unique Identifier of the Resource",
@@ -21,4 +19,3 @@ UUID_FIELD_WITH_DEFAULT = Field(
 # Requests
 class RequestHeaders(BaseModel):
     x_forwarded_user: str
-    

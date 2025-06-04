@@ -29,7 +29,6 @@ class StreamChunk(TypedDict):
     step: StreamStep
 
 
-
 # Requests
 class AgentRequest(BaseModel):
     """
@@ -38,6 +37,7 @@ class AgentRequest(BaseModel):
 
     message: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 # Responses
 class AgentResponse(BaseModel):

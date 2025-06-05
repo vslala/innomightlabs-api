@@ -1,4 +1,3 @@
-from typing import Annotated
 from fastapi import APIRouter, Depends
 from app.common.config import ServiceFactory
 from app.common.controller import BaseController
@@ -12,7 +11,7 @@ class UserController(BaseController):
     @property
     def router(self) -> APIRouter:
         @self.api_router.post("")
-        async def create_user(request: UserCreateRequest, user_service: Annotated[UserService, Depends(ServiceFactory.get_user_service)]) -> UserResponse:
+        async def create_user(request: UserCreateRequest, user_service: UserService = Depends(ServiceFactory.get_user_service)) -> UserResponse:
             user = await user_service.add_user(request)
             return UserResponse(**user.model_dump())
 

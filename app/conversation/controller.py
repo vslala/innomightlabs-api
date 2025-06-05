@@ -31,7 +31,7 @@ class ConversationController(BaseController):
             This endpoint initializes a new conversation session.
             """
             user: User = request.state.user
-            conversation: Conversation = conversation_service.start_new_conversation(user=user)
+            conversation: Conversation = await conversation_service.start_new_conversation(user=user)
             return ConversationResponse(**conversation.model_dump())
 
         return self.api_router

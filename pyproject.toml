@@ -12,6 +12,8 @@ dependencies = [
     "langgraph>=0.4.7",
     "pgvector>=0.4.1",
     "psycopg2>=2.9.10",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
     "python-dotenv>=1.1.0",
     "sqlalchemy~=2.0",
     "uvicorn>=0.34.2",
@@ -26,3 +28,8 @@ line-length = 220
 
 [tool.ruff.lint]
 extend-select = ["E", "F"]
+
+[tool.pytest.ini_options]
+markers = [
+    "asyncio: mark test as asyncio to run it with an event loop"
+]

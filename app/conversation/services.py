@@ -12,7 +12,7 @@ class ConversationService:
     def __init__(self, conversation_repository: ConversationRepository):
         self.repository = conversation_repository
 
-    def start_new_conversation(self, user: User) -> Conversation:
+    async def start_new_conversation(self, user: User) -> Conversation:
         """
         Starts a new conversation for the given user ID.
 

@@ -2,12 +2,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
-from app.workflows.chatbot import BaseChatbot
+from app.chatbot import BaseChatbot
 from app.common.config import ChatbotFactory
 from app.common.controller import BaseController
 from app.common.models import RequestHeaders
-from app.workflows.chat_agent_workflow import AgenticWorkflow
-from app.workflows.models import AgentRequest, AgentState, AgentStreamResponse, StreamStep
+from app.chatbot.chat_agent_workflow import AgenticWorkflow
+from app.chatbot.chatbot_models import AgentRequest, AgentState, AgentStreamResponse, StreamStep
 
 
 class AgentController(BaseController):

@@ -6,8 +6,8 @@ from fastapi import FastAPI
 
 from fastapi.testclient import TestClient
 from app.common.controller import BaseController
-from app.user.controller import UserController
-from app.user.models import UserCreateRequest
+from app.user.user_controller import UserController
+from app.user.user_models import UserCreateRequest
 from app.user import User
 
 

@@ -15,7 +15,7 @@ def test_start_conversation(
     build_app: Callable[[list[type[BaseController]]], FastAPI],
     mock_conversation_service: AsyncMock,
 ):
-    from app.conversation.controller import ConversationController
+    from app.conversation.conversation_controller import ConversationController
 
     # 1) Build the app and inject a fake user into request.state.user
     fake_user = User(

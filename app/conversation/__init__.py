@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID
 from pydantic import BaseModel
-from app.conversation.entities import ConversationEntity
+from app.conversation.conversation_entities import ConversationEntity
 
 
 class Conversation(BaseModel):

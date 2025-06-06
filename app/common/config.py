@@ -1,9 +1,9 @@
 from functools import lru_cache
-from app.user.services import UserService
+from app.chatbot import BaseChatbot, GeminiChatbot
+from app.user.user_services import UserService
 from app.user.user_repository import UserRepository
-from app.workflows.chatbot import BaseChatbot, GeminiChatbot
-from app.conversation.repositories import ConversationRepository
-from app.conversation.services import ConversationService
+from app.conversation.conversation_repositories import ConversationRepository
+from app.conversation.conversation_services import ConversationService
 import os
 
 from sqlalchemy import create_engine

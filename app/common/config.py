@@ -68,13 +68,20 @@ class ServiceFactory:
     @staticmethod
     @lru_cache
     def get_chatbot_service() -> ChatbotService:
-        chatbot_service = ChatbotService(chatbot=ChatbotFactory.create_chatbot(owner="google", model_name="gemini-2.0-flash", temperature=0.0), embedding_model=ChatbotFactory.get_embedding_model())
+        chatbot_service = ChatbotService(
+            chatbot=ChatbotFactory.create_chatbot(owner="google", model_name="gemini-2.0-flash", temperature=0.0),
+            embedding_model=ChatbotFactory.get_embedding_model(),
+        )
         return chatbot_service
 
     @staticmethod
     @lru_cache
     def get_message_service() -> MessageService:
-        message_service = MessageService(RepositoryFactory.get_transaction_manager(), RepositoryFactory.get_message_repository(), ServiceFactory.get_chatbot_service())
+        message_service = MessageService(
+            RepositoryFactory.get_transaction_manager(),
+            RepositoryFactory.get_message_repository(),
+            ServiceFactory.get_chatbot_service(),
+        )
         return message_service
 
 

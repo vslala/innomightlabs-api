@@ -52,7 +52,13 @@ class MessageController(BaseController):
                         agent_response = agent_response.join([chunk.content])
                         yield chunk.stream_response()
 
-                    user_message = Message(content=message.content, role="user", conversation_id=conversation_id, model_id=message.model_id, parent_message_id=message.parent_message_id)
+                    user_message = Message(
+                        content=message.content,
+                        role="user",
+                        conversation_id=conversation_id,
+                        model_id=message.model_id,
+                        parent_message_id=message.parent_message_id,
+                    )
 
                     agent_response = Message(
                         content=agent_response,
@@ -65,7 +71,11 @@ class MessageController(BaseController):
                     user_message, agent_response = await message_service.add_messages(user=user, user_message=user_message, agent_response=agent_response)
                     if not user_message.id:
                         raise ValueError("Message Id should not be null!")
-                    response = MessageResponse(message_id=user_message.id, user_message=user_message.content, agent_response=agent_response.content)
+                    response = MessageResponse(
+                        message_id=user_message.id,
+                        user_message=user_message.content,
+                        agent_response=agent_response.content,
+                    )
 
                     yield AgentStreamResponse(content=response.model_dump_json(), step=StreamStep.END).stream_response()
                 except Exception as e:

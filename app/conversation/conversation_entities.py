@@ -21,5 +21,16 @@ class ConversationEntity(BaseEntity):
     summary: Mapped[str] = mapped_column(nullable=True, doc="Summary of the Conversation")
     summary_embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=True, doc="Embeddings of the Conversation summary for search and retrieval")
     status: Mapped[str] = mapped_column(nullable=False, default="active", doc="Status of the Conversation (e.g., active, archived)")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), doc="Timestamp when the Conversation was created")
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc), doc="Timestamp when the Conversation was last updated")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        doc="Timestamp when the Conversation was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+        doc="Timestamp when the Conversation was last updated",
+    )

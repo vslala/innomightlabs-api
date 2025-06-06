@@ -1,5 +1,5 @@
 from app.conversation import Conversation
-from app.conversation.repositories import ConversationRepository
+from app.conversation.conversation_repositories import ConversationRepository
 from app.user import User
 
 

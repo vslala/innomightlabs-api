@@ -1,6 +1,6 @@
 from uuid import UUID
 from app.user import User
-from app.user.models import UserCreateRequest
+from app.user.user_models import UserCreateRequest
 from app.user.user_repository import UserRepository
 
 

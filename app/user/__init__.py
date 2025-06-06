@@ -3,7 +3,7 @@ from typing import Optional, Self
 from uuid import UUID
 from pydantic import BaseModel
 
-from app.user.entities import UserEntity
+from app.user.user_entities import UserEntity
 
 
 class User(BaseModel):

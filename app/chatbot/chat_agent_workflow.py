@@ -2,8 +2,8 @@ import asyncio
 from typing import AsyncGenerator
 from langgraph.graph import StateGraph, START, END
 
-from app.workflows.chatbot import BaseChatbot
-from app.workflows.models import AgentState, StreamChunk, StreamStep
+from app.chatbot import BaseChatbot
+from app.chatbot.chatbot_models import AgentState, StreamChunk, StreamStep
 
 
 class AgenticWorkflow:
@@ -16,7 +16,6 @@ class AgenticWorkflow:
     ):
         self.state = state
         self.chatbot = chatbot
-        self.state["stream_queue"] = asyncio.Queue()
 
     async def run(self) -> AsyncGenerator[StreamChunk, None]:
         """Run the workflow."""

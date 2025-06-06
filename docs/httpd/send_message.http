@@ -1,0 +1,7 @@
+POST http://localhost:8000/api/v1/conversation/58792226-20c5-4421-b6ec-52e64a2b33ae/message
+Content-Content-Type: "application/json"
+X-Forwarded-User: vslala
+
+{
+    "content": "John is twice as old as Mary was when John was as old as Mary is now. If John is 24 and Mary is 16, how old was Mary when John was as old as Mary is now?"
+}

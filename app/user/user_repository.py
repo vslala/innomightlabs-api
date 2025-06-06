@@ -2,7 +2,7 @@ from uuid import UUID
 from app.common.repositories import BaseRepository
 from app.user import User as UserDomain
 from app.common.exceptions import NotFoundException
-from app.user.entities import UserEntity
+from app.user.user_entities import UserEntity
 
 
 class UserRepository(BaseRepository):

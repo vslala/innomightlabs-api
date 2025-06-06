@@ -5,8 +5,8 @@ from app.common.config import ServiceFactory
 from app.common.controller import BaseController
 from app.common.models import RequestHeaders
 from app.conversation import Conversation
-from app.conversation.models import ConversationResponse
-from app.conversation.services import ConversationService
+from app.conversation.conversation_models import ConversationResponse
+from app.conversation.conversation_services import ConversationService
 from app.user import User
 
 

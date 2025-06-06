@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from app.common.config import ServiceFactory
 from app.common.controller import BaseController
-from app.user.models import UserCreateRequest, UserResponse
-from app.user.services import UserService
+from app.user.user_models import UserCreateRequest, UserResponse
+from app.user.user_services import UserService
 
 
 class UserController(BaseController):

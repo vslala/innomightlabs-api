@@ -1,5 +1,11 @@
 from functools import lru_cache
+
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot, GeminiChatbot
+from app.chatbot.chatbot_services import ChatbotService
+from app.common.repositories import TransactionManager
+from app.conversation.messages.message_repositories import MessageRepository
+from app.conversation.messages.message_services import MessageService
 from app.user.user_services import UserService
 from app.user.user_repository import UserRepository
 from app.conversation.conversation_repositories import ConversationRepository
@@ -59,8 +65,25 @@ class ServiceFactory:
         user_service = UserService(RepositoryFactory.get_user_repository())
         return user_service
 
+    @staticmethod
+    @lru_cache
+    def get_chatbot_service() -> ChatbotService:
+        chatbot_service = ChatbotService(chatbot=ChatbotFactory.create_chatbot(owner="google", model_name="gemini-2.0-flash", temperature=0.0), embedding_model=ChatbotFactory.get_embedding_model())
+        return chatbot_service
+
+    @staticmethod
+    @lru_cache
+    def get_message_service() -> MessageService:
+        message_service = MessageService(RepositoryFactory.get_transaction_manager(), RepositoryFactory.get_message_repository(), ServiceFactory.get_chatbot_service())
+        return message_service
+
 
 class RepositoryFactory:
+    @staticmethod
+    @lru_cache
+    def get_transaction_manager() -> TransactionManager:
+        return TransactionManager(session=SessionFactory.get_session())
+
     @staticmethod
     @lru_cache
     def get_conversation_repository() -> ConversationRepository:
@@ -73,8 +96,18 @@ class RepositoryFactory:
         user_repository = UserRepository(session=SessionFactory.get_session())
         return user_repository
 
+    @staticmethod
+    @lru_cache
+    def get_message_repository() -> MessageRepository:
+        message_repository = MessageRepository(session=SessionFactory.get_session())
+        return message_repository
+
 
 class ChatbotFactory:
     @staticmethod
     def create_chatbot(owner: str, model_name: str, temperature: float = 0.0) -> BaseChatbot:
         return GeminiChatbot(model_name=model_name, temperature=temperature)
+
+    @staticmethod
+    def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
+        return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-exp-03-07")

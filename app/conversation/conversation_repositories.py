@@ -1,7 +1,7 @@
 from app.common.repositories import BaseRepository
 
 from app.conversation import Conversation
-from app.conversation.entities import ConversationEntity
+from app.conversation.conversation_entities import ConversationEntity
 from app.user import User
 
 

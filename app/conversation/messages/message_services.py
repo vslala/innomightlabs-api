@@ -6,7 +6,12 @@ from app.user import User
 
 
 class MessageService:
-    def __init__(self, transaction_manager: TransactionManager, message_repository: MessageRepository, chatbot_service: ChatbotService) -> None:
+    def __init__(
+        self,
+        transaction_manager: TransactionManager,
+        message_repository: MessageRepository,
+        chatbot_service: ChatbotService,
+    ) -> None:
         self.repository = message_repository
         self.transaction_manager = transaction_manager
         self.chatbot_service = chatbot_service

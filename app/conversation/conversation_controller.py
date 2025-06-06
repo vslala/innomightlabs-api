@@ -25,7 +25,11 @@ class ConversationController(BaseController):
             response_model=ConversationResponse,
             responses={200: {"description": "Conversation started successfully"}},
         )
-        async def start_conversation(request: Request, headers: Annotated[RequestHeaders, Header()], conversation_service: ConversationService = Depends(ServiceFactory.get_conversation_service)) -> ConversationResponse:
+        async def start_conversation(
+            request: Request,
+            headers: Annotated[RequestHeaders, Header()],
+            conversation_service: ConversationService = Depends(ServiceFactory.get_conversation_service),
+        ) -> ConversationResponse:
             """
             Endpoint to start a new conversation.
             This endpoint initializes a new conversation session.

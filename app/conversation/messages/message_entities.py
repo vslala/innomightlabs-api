@@ -22,5 +22,16 @@ class MessageEntity(BaseEntity):
     message: Mapped[str] = mapped_column(nullable=False, doc="Content of the Message")
     message_embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False, doc="Embeddings of the Message content for search and retrieval")
     parent_message_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=True, doc="ID of the parent Message in the conversation thread")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), doc="Timestamp when the Message was created")
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc), doc="Timestamp when the Message was last updated")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        doc="Timestamp when the Message was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+        doc="Timestamp when the Message was last updated",
+    )

@@ -18,7 +18,11 @@ class BaseController(ABC):
         """
         Initialize the controller with the request object.
         """
-        self.api_router = APIRouter(prefix=f"/api/v1/{self.prefix}" if self.prefix else "", tags=self.tags if self.tags else [self.prefix], redirect_slashes=False)
+        self.api_router = APIRouter(
+            prefix=f"/api/v1/{self.prefix}" if self.prefix else "",
+            tags=self.tags if self.tags else [self.prefix],
+            redirect_slashes=False,
+        )
 
     @property
     @abstractmethod

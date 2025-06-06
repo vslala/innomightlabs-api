@@ -1,18 +1,9 @@
+import asyncio
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Optional, TypedDict
 
 from pydantic import BaseModel, Field
-
-
-class AgentState(TypedDict):
-    """State for the chat agent workflow."""
-
-    messages: list[str]
-    user_message: str
-    agent_message: str
-    scratchpad: str  # Optional scratchpad for intermediate thoughts or notes
-    stream_queue: Any
 
 
 class StreamStep(Enum):
@@ -20,6 +11,8 @@ class StreamStep(Enum):
 
     THIKING = "thinking"
     FINAL_RESPONSE = "final_response"
+    END = "end"
+    ERROR = "error"
 
 
 class StreamChunk(TypedDict):
@@ -27,6 +20,16 @@ class StreamChunk(TypedDict):
 
     content: str
     step: StreamStep
+
+
+class AgentState(TypedDict):
+    """State for the chat agent workflow."""
+
+    messages: list[str]
+    user_message: str
+    agent_message: Optional[str]
+    scratchpad: Optional[str]
+    stream_queue: Optional[asyncio.Queue[StreamChunk]]
 
 
 # Requests
@@ -57,3 +60,10 @@ class AgentStreamResponse(BaseModel):
     content: str
     step: StreamStep
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def stream_response(self) -> str:
+        """
+        Returns a string representation of the request for streaming.
+        This method is used to format the request for streaming responses.
+        """
+        return f"data: {self.model_dump_json()}\n\n"

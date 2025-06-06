@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.common.middlewares import UserPopulationMiddleware
 from app.common import get_controllers
+from app.common.middlewares import UserPopulationMiddleware
 
 app = FastAPI()
 

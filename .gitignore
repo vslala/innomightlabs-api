@@ -10,3 +10,9 @@ wheels/
 # Virtual environments
 .venv
 .envrc
+
+
+# User generated
+*.dat
+*.db
+flyway.log

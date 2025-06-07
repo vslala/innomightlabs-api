@@ -1,9 +1,10 @@
 import asyncio
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 from langgraph.graph import StateGraph, START, END
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import AgentState, StreamChunk, StreamStep
+from app.chatbot.chatbot_models import AgentMessage, AgentState, StreamChunk, StreamStep
 
 
 class AgenticWorkflow:
@@ -29,11 +30,11 @@ class AgenticWorkflow:
                 # log for metrics and debugging
                 # print(f"State: {wrapped_state}")
                 pass
-            await self.state["stream_queue"].put(None)  # Signal the end of the stream
+            await self.state.stream_queue.put(None)  # Signal the end of the stream
 
         task = asyncio.create_task(drive_workflow())
         while True:
-            chunk = await self.state["stream_queue"].get()
+            chunk = await self.state.stream_queue.get()
             if chunk is None:
                 break
             yield chunk
@@ -42,23 +43,33 @@ class AgenticWorkflow:
 
     async def _chain_of_thoughts(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Process the user's message and generate a chain of thoughts to better understand and answer user's query."""
+        # Prepare formatted conversation history
+        conversation_history = "\n".join(msg.get_formatted_prompt() for msg in state.messages)
+
         chain_of_thoughts_prompt = f"""
+        [System Prompt]
         You are a thoughtful and analytical assistant. Your task is to answer the user's question in two steps:
         1. Chain of Thoughts: Think step by step, and write down your reasoning process as you try to understand what the user really wants, 
         clarify the request if needed, and plan your answer.
         2. Final Answer: Based on your chain of thoughts, provide a clear and helpful answer.
 
-        User's question:
+        [Conversation History]
+        {conversation_history}        
+        
+        [User's current question]
         \"\"\"
-        {state["user_message"]}
+        {state.user_message}
         \"\"\"
 
         Let's think step by step.
         """
-        state["scratchpad"] = ""
+
+        print(f"[Actual Prompt]\n{chain_of_thoughts_prompt}")
+
+        state.scratchpad = ""
         async for chunk in self.chatbot.stream_response(chain_of_thoughts_prompt):
-            state["scratchpad"] += str(chunk)
-            await self.state["stream_queue"].put(StreamChunk(content=str(chunk), step=StreamStep.THIKING))
+            state.scratchpad += str(chunk)
+            await self.state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.THIKING))
             yield state
             await asyncio.sleep(0.5)
 
@@ -66,15 +77,15 @@ class AgenticWorkflow:
         """Finalize the answer based on the given chain of thoughts."""
 
         async for chunk in self.chatbot.stream_response(
-            f"""{state.get("scratchpad", "")}
+            f"""{state.scratchpad}
             
             Based on the above chain of thoughts, please provide a clear and concise answer to the user's question in markdown format."""
         ):
-            state["agent_message"] += str(chunk)
-            await self.state["stream_queue"].put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE))
+            state.agent_message = "".join([str(chunk)])
+            await self.state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE))
             yield state
             await asyncio.sleep(0.5)
-        state["messages"].append(state["agent_message"])
+        state.messages.append(AgentMessage(message=state.agent_message, role="assistant", timestamp=datetime.now(timezone.utc)))
 
     def _build_graph(self):
         """Build the state graph for the agentic workflow."""

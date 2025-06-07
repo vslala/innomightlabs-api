@@ -1,9 +1,9 @@
 import asyncio
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, TypedDict
+from typing import TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StreamStep(Enum):
@@ -22,14 +22,27 @@ class StreamChunk(TypedDict):
     step: StreamStep
 
 
-class AgentState(TypedDict):
+class AgentMessage(BaseModel):
+    message: str
+    role: str
+    timestamp: datetime
+
+    def get_formatted_prompt(self) -> str:
+        ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M")
+        role_cap = self.role.capitalize()
+        return f"[{role_cap}  - {ts_str}]  {self.message}"
+
+
+class AgentState(BaseModel):
     """State for the chat agent workflow."""
 
-    messages: list[str]
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    messages: list[AgentMessage]
     user_message: str
-    agent_message: Optional[str]
-    scratchpad: Optional[str]
-    stream_queue: Optional[asyncio.Queue[StreamChunk]]
+    agent_message: str = Field(default="")
+    scratchpad: str = Field(default="")
+    stream_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
 
 
 # Requests
@@ -38,6 +51,7 @@ class AgentRequest(BaseModel):
     Represents a request to an agent.
     """
 
+    message_history: list[AgentMessage]
     message: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

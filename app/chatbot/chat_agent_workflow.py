@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 
 from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentMessage, AgentState, StreamChunk, StreamStep
+from app.common.models import Role
 
 
 class AgenticWorkflow:
@@ -85,7 +86,7 @@ class AgenticWorkflow:
             await self.state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE))
             yield state
             await asyncio.sleep(0.5)
-        state.messages.append(AgentMessage(message=state.agent_message, role="assistant", timestamp=datetime.now(timezone.utc)))
+        state.messages.append(AgentMessage(message=state.agent_message, role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)))
 
     def _build_graph(self):
         """Build the state graph for the agentic workflow."""

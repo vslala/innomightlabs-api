@@ -3,9 +3,11 @@ import subprocess
 import sys
 import os
 
+
 def die(msg, code=1):
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(code)
+
 
 def main():
     if len(sys.argv) != 2:
@@ -16,10 +18,7 @@ def main():
 
     # Find the repo root
     try:
-        repo_root = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
+        repo_root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
         die("Not inside a Git repository.")
 
@@ -28,11 +27,7 @@ def main():
 
     # Run git diff
     with open(diff_file, "wb") as df:
-        proc = subprocess.run(
-            ["git", "diff", target_branch],
-            stdout=df,
-            stderr=subprocess.PIPE
-        )
+        proc = subprocess.run(["git", "diff", target_branch], stdout=df, stderr=subprocess.PIPE)
         if proc.returncode != 0:
             # remove incomplete file
             df.close()
@@ -42,11 +37,7 @@ def main():
 
     # Run git show HEAD
     with open(head_file, "wb") as hf:
-        proc = subprocess.run(
-            ["git", "show", "HEAD"],
-            stdout=hf,
-            stderr=subprocess.PIPE
-        )
+        proc = subprocess.run(["git", "show", "HEAD"], stdout=hf, stderr=subprocess.PIPE)
         if proc.returncode != 0:
             hf.close()
             os.remove(head_file)

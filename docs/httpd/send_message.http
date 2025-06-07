@@ -1,8 +1,0 @@
-POST http://localhost:8000/api/v1/conversation/58792226-20c5-4421-b6ec-52e64a2b33ae/message
-Content-Content-Type: "application/json"
-X-Forwarded-User: vslala
-
-{
-    "content": "Hi Assistant, can you explain what vector search is?",
-    "parent_message_id": null
-}

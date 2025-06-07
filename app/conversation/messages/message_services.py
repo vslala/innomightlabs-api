@@ -43,3 +43,6 @@ class MessageService:
     async def get_conversation_history(self, conversation_id: UUID, message_content: str) -> list[Message]:
         embedding = await self.chatbot_service.generate_embedding(message_content)
         return self.repository.fetch_all_by_conversation_id_and_embedding(conversation_id=conversation_id, embedding=embedding, top_k=10)
+
+    async def get_all_messages(self, conversation_id: UUID) -> list[Message]:
+        return await self.repository.fetch_all_messages(conversation_id=conversation_id)

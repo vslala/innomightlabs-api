@@ -11,7 +11,7 @@ from app.user import User
 
 
 class ConversationController(BaseController):
-    prefix = "conversation"
+    prefix = "conversations"
 
     @property
     def router(self) -> APIRouter:

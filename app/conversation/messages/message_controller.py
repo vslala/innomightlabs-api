@@ -1,5 +1,5 @@
 import json
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
@@ -7,8 +7,8 @@ from app.chatbot.chatbot_models import AgentMessage, AgentRequest, AgentStreamRe
 from app.chatbot.chatbot_services import ChatbotService
 from app.common.config import ServiceFactory
 from app.common.controller import BaseController
-from app.common.models import RequestHeaders
-from app.conversation.messages.message_models import MessageRequest, MessageResponse
+from app.common.models import RequestHeaders, Role
+from app.conversation.messages.message_models import MessageRequest, MessageResponse, MessageStreamFinalResponse
 from app.conversation.messages import Message
 from app.conversation.messages.message_services import MessageService
 from app.user import User
@@ -21,7 +21,7 @@ class MessageController(BaseController):
     This class extends the BaseController to provide message-specific endpoints.
     """
 
-    prefix = "conversation/{conversation_id}/message"
+    prefix = "conversations/{conversation_id}/messages"
 
     @property
     def router(self) -> APIRouter:
@@ -57,12 +57,13 @@ class MessageController(BaseController):
                         )
                     ):
                         print(chunk.content, end="")
-                        agent_response = agent_response.join([chunk.content])
+                        if chunk.step is StreamStep.FINAL_RESPONSE:
+                            agent_response = "".join([agent_response, chunk.content])
                         yield chunk.stream_response()
 
                     user_message = Message(
                         content=message.content,
-                        role="user",
+                        role=Role.USER,
                         conversation_id=conversation_id,
                         model_id=message.model_id,
                         parent_message_id=message.parent_message_id,
@@ -70,7 +71,7 @@ class MessageController(BaseController):
 
                     agent_response = Message(
                         content=agent_response,
-                        role="assistant",
+                        role=Role.ASSISTANT,
                         conversation_id=conversation_id,
                         model_id=message.model_id,
                         parent_message_id=message.parent_message_id,
@@ -79,7 +80,7 @@ class MessageController(BaseController):
                     user_message, agent_response = await message_service.add_messages(user=user, user_message=user_message, agent_response=agent_response)
                     if not user_message.id:
                         raise ValueError("Message Id should not be null!")
-                    response = MessageResponse(
+                    response = MessageStreamFinalResponse(
                         message_id=user_message.id,
                         user_message=user_message.content,
                         agent_response=agent_response.content,
@@ -90,5 +91,26 @@ class MessageController(BaseController):
                     yield AgentStreamResponse(content=json.dumps({"error": str(e)}), step=StreamStep.ERROR).stream_response()
 
             return StreamingResponse(_handle_streaming_response(), media_type="text/event-stream")
+
+        @self.api_router.get(
+            "",
+            response_model=list[MessageResponse],
+            responses={
+                200: {
+                    "description": "List of all messages for the given Conversation Id",
+                    "content": {"application/json": {}},
+                }
+            },
+        )
+        async def get_all_messages(conversation_id: UUID, message_service: MessageService = Depends(ServiceFactory.get_message_service)):
+            messages = await message_service.get_all_messages(conversation_id=conversation_id)
+            return [
+                MessageResponse(
+                    id=cast(UUID, e.id),
+                    content=e.content,
+                    role=e.role,
+                )
+                for e in messages
+            ]
 
         return self.api_router

@@ -1,0 +1,15 @@
+POST http://localhost:8000/api/v1/conversations/58792226-20c5-4421-b6ec-52e64a2b33ae/messages
+Content-Type: "application/json"
+X-Forwarded-User: vslala
+
+{
+    "content": "is blue whale like elephant?",
+    "parent_message_id": null
+}
+
+###
+
+GET  http://localhost:8000/api/v1/conversations/58792226-20c5-4421-b6ec-52e64a2b33ae/messages
+Content-Type: "application/json"
+X-Forwarded-User: vslala
+

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from pgvector.sqlalchemy import Vector
 from app.common.entities import BaseEntity
+from app.common.models import Role
 
 
 class MessageEntity(BaseEntity):
@@ -17,7 +18,7 @@ class MessageEntity(BaseEntity):
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, doc="Unique Identifier of the Message")
     conversation_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, doc="ID of the Conversation to which this Message belongs")
     sender_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=True, doc="ID of the User who sent the Message")
-    role: Mapped[str] = mapped_column(nullable=False, doc="Role of the sender (e.g., user, assistant, system)")
+    role: Mapped[Role] = mapped_column(nullable=False, doc="Role of the sender (e.g., user, assistant, system)")
     model_id: Mapped[str] = mapped_column(nullable=False, default="gemini-2.0-flash", doc="ID of the model used to generate the Message")
     message: Mapped[str] = mapped_column(nullable=False, doc="Content of the Message")
     message_embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False, doc="Embeddings of the Message content for search and retrieval")

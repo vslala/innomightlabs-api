@@ -59,3 +59,19 @@ class MessageRepository(BaseRepository):
             )
             for e in entities
         ]
+
+    async def fetch_all_messages(self, conversation_id: UUID) -> list[Message]:
+        entity_messages = self.session.query(MessageEntity).filter(MessageEntity.conversation_id == conversation_id).order_by(MessageEntity.created_at).all()
+        return [
+            Message(
+                id=e.id,
+                conversation_id=e.conversation_id,
+                content=e.message,
+                embedding=e.message_embedding,
+                role=e.role,
+                parent_message_id=e.parent_message_id,
+                created_at=e.created_at,
+                updated_at=e.updated_at,
+            )
+            for e in entity_messages
+        ]

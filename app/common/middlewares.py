@@ -14,6 +14,7 @@ class UserPopulationMiddleware(BaseHTTPMiddleware):
         if request.method == "POST" and "/users" in request.url.path:
             return await call_next(request)
         x_username = request.headers.get("x-forwarded-user")
+        print(f"Found username: {x_username}")
         user = None
         if x_username:
             service = ServiceFactory.get_user_service()

@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.common.models import Role
+
 
 class Message(BaseModel):
     """
@@ -15,7 +17,7 @@ class Message(BaseModel):
     content: str
     embedding: Optional[list[float]] = None
     conversation_id: UUID
-    role: str
+    role: Role
     parent_message_id: UUID | None = None
     model_id: str = "gemini-2.0-flash"
     created_at: datetime = datetime.now(timezone.utc)

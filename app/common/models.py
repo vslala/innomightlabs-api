@@ -1,3 +1,4 @@
+from enum import Enum
 from uuid import uuid4
 from pydantic import BaseModel
 
@@ -14,6 +15,11 @@ UUID_FIELD_WITH_DEFAULT = Field(
     pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     default_factory=lambda: str(uuid4()),
 )
+
+
+class Role(Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
 
 
 # Requests

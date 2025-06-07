@@ -5,6 +5,8 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.common.models import Role
+
 
 class StreamStep(Enum):
     """Enum for different steps in the streaming process."""
@@ -24,12 +26,12 @@ class StreamChunk(TypedDict):
 
 class AgentMessage(BaseModel):
     message: str
-    role: str
+    role: Role
     timestamp: datetime
 
     def get_formatted_prompt(self) -> str:
         ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M")
-        role_cap = self.role.capitalize()
+        role_cap = self.role.value.capitalize()
         return f"[{role_cap}  - {ts_str}]  {self.message}"
 
 

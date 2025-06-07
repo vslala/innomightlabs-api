@@ -3,6 +3,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.chatbot.chatbot_models import StreamStep
+from app.common.models import Role
 
 
 class MessageRequest(BaseModel):
@@ -16,6 +17,13 @@ class MessageRequest(BaseModel):
 
 
 class MessageResponse(BaseModel):
+    id: UUID
+    content: str
+    role: Role
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MessageStreamFinalResponse(BaseModel):
     message_id: UUID
     user_message: str
     agent_response: str

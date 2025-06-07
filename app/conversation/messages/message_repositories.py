@@ -1,4 +1,6 @@
 from uuid import UUID
+
+from sqlalchemy import select
 from app.common.repositories import BaseRepository
 from sqlalchemy.orm import Session
 
@@ -33,3 +35,27 @@ class MessageRepository(BaseRepository):
         message.updated_at = message_entity.updated_at
 
         return message
+
+    def fetch_all_by_conversation_id_and_embedding(self, conversation_id: UUID, embedding: list[float], top_k: int = 10):
+        stmt = (
+            select(MessageEntity)
+            .where(MessageEntity.conversation_id == conversation_id)
+            .order_by(MessageEntity.message_embedding.l2_distance(embedding), MessageEntity.updated_at)
+            .limit(top_k)
+        )
+
+        entities = self.session.scalars(stmt).all()
+        return [
+            Message(
+                id=e.id,
+                conversation_id=e.conversation_id,
+                role=e.role,
+                model_id=e.model_id,
+                content=e.message,
+                embedding=e.message_embedding,
+                parent_message_id=e.parent_message_id,
+                created_at=e.created_at,
+                updated_at=e.updated_at,
+            )
+            for e in entities
+        ]

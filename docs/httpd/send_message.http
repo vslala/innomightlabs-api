@@ -3,5 +3,6 @@ Content-Content-Type: "application/json"
 X-Forwarded-User: vslala
 
 {
-    "content": "John is twice as old as Mary was when John was as old as Mary is now. If John is 24 and Mary is 16, how old was Mary when John was as old as Mary is now?"
+    "content": "Hi Assistant, can you explain what vector search is?",
+    "parent_message_id": null
 }

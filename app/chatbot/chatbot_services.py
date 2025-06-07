@@ -21,7 +21,7 @@ class ChatbotService:
         """Send a message to the chatbot and return the response."""
         stream = asyncio.Queue[StreamChunk]()
         state = AgentState(
-            messages=[],
+            messages=request.message_history,
             user_message=request.message,
             agent_message="",
             scratchpad="",

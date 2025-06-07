@@ -1,8 +1,9 @@
 import json
 from typing import Annotated
+from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
-from app.chatbot.chatbot_models import AgentRequest, AgentStreamResponse, StreamStep
+from app.chatbot.chatbot_models import AgentMessage, AgentRequest, AgentStreamResponse, StreamStep
 from app.chatbot.chatbot_services import ChatbotService
 from app.common.config import ServiceFactory
 from app.common.controller import BaseController
@@ -33,7 +34,7 @@ class MessageController(BaseController):
         async def send_message(
             request: Request,
             headers: Annotated[RequestHeaders, Header()],
-            conversation_id: str,
+            conversation_id: UUID,
             message: MessageRequest,
             message_service: MessageService = Depends(ServiceFactory.get_message_service),
             chatbot_service: ChatbotService = Depends(ServiceFactory.get_chatbot_service),
@@ -44,11 +45,18 @@ class MessageController(BaseController):
             """
             user: User = request.state.user
             logging.info(f"conversation_id: {conversation_id},\nuser: {user.model_dump_json},\nuser request: {message.model_dump_json()}")
+            similar_messages = await message_service.get_conversation_history(conversation_id=conversation_id, message_content=message.content)
 
             async def _handle_streaming_response():
                 try:
                     agent_response = ""
-                    async for chunk in chatbot_service.ask_async(request=AgentRequest(message=message.content)):
+                    async for chunk in chatbot_service.ask_async(
+                        request=AgentRequest(
+                            message_history=[AgentMessage(message=m.content, role=m.role, timestamp=m.updated_at) for m in similar_messages],
+                            message=message.content,
+                        )
+                    ):
+                        print(chunk.content, end="")
                         agent_response = agent_response.join([chunk.content])
                         yield chunk.stream_response()
 

@@ -14,7 +14,7 @@ class Message(BaseModel):
     id: Optional[UUID] = None
     content: str
     embedding: Optional[list[float]] = None
-    conversation_id: str
+    conversation_id: UUID
     role: str
     parent_message_id: UUID | None = None
     model_id: str = "gemini-2.0-flash"

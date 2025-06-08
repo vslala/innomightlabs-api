@@ -70,7 +70,7 @@ class AgenticWorkflow:
         state.scratchpad = ""
         async for chunk in self.chatbot.stream_response(chain_of_thoughts_prompt):
             state.scratchpad += str(chunk)
-            await self.state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.THIKING))
+            await self.state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.THOUGHT))
             yield state
             await asyncio.sleep(0.5)
 

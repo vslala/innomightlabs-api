@@ -13,3 +13,11 @@ GET  http://localhost:8000/api/v1/conversations/58792226-20c5-4421-b6ec-52e64a2b
 Content-Type: "application/json"
 X-Forwarded-User: vslala
 
+
+###
+
+GET  http://localhost:8000/api/v1/conversations
+Content-Type: "application/json"
+X-Forwarded-User: vslala
+
+

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Self
 from uuid import UUID
 from pydantic import BaseModel
@@ -24,6 +24,7 @@ class ConversationResponse(BaseModel):
 
     id: UUID
     title: str
+    summary: str
     status: str
     created_at: datetime
     updated_at: datetime
@@ -31,5 +32,20 @@ class ConversationResponse(BaseModel):
     @classmethod
     def from_conversation(cls, conversation: Conversation) -> Self:
         return cls(
-            id=conversation.id, title=conversation.title, status=conversation.status, created_at=conversation.created_at, updated_at=conversation.updated_at
+            id=conversation.id,
+            title=conversation.title,
+            summary=conversation.summary,
+            status=conversation.status,
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
         )
+
+
+class ConversationRepositoryDTO(BaseModel):
+    id: UUID
+    title: str
+    summary: str
+    summary_embedding: list[float]
+    status: str
+    created_at: datetime = datetime.now(timezone.utc)
+    updated_at: datetime = datetime.now(timezone.utc)

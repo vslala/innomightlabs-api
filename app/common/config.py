@@ -1,4 +1,5 @@
 from functools import lru_cache
+import logging
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot, GeminiChatbot
@@ -15,6 +16,10 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
 
+# set sql alchemy logs to only error
+logging.basicConfig()
+logging.getLogger('sqlalchemy').setLevel(logging.ERROR)
+
 # 1) Read env vars once, build the URL once
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
@@ -28,7 +33,7 @@ if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # 2) Create the engine once
-engine = create_engine(DATABASE_URL, echo=True, future=True)
+engine = create_engine(DATABASE_URL, echo=False, future=True)
 
 # 3) Create a Session factory once
 session_factory = sessionmaker(
@@ -56,7 +61,9 @@ class ServiceFactory:
     @staticmethod
     @lru_cache
     def get_conversation_service() -> ConversationService:
-        conversation_service = ConversationService(conversation_repository=RepositoryFactory.get_conversation_repository())
+        conversation_service = ConversationService(
+            conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service()
+        )
         return conversation_service
 
     @staticmethod

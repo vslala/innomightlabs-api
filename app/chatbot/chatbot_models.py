@@ -83,3 +83,10 @@ class AgentStreamResponse(BaseModel):
         This method is used to format the request for streaming responses.
         """
         return f"data: {self.model_dump_json()}\n\n"
+
+
+class AgentMessageSummary(BaseModel):
+    """Represents a title and summary for the given messages"""
+
+    title: str
+    summary: str

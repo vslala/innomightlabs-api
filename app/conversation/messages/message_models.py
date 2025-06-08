@@ -24,6 +24,8 @@ class MessageResponse(BaseModel):
 
 
 class MessageStreamFinalResponse(BaseModel):
+    title: str
+    summary: str
     message_id: UUID
     user_message: str
     agent_response: str

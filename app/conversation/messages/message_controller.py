@@ -8,6 +8,7 @@ from app.chatbot.chatbot_services import ChatbotService
 from app.common.config import ServiceFactory
 from app.common.controller import BaseController
 from app.common.models import RequestHeaders, Role
+from app.conversation.conversation_services import ConversationService
 from app.conversation.messages.message_models import MessageRequest, MessageResponse, MessageStreamFinalResponse
 from app.conversation.messages import Message
 from app.conversation.messages.message_services import MessageService
@@ -38,6 +39,7 @@ class MessageController(BaseController):
             message: MessageRequest,
             message_service: MessageService = Depends(ServiceFactory.get_message_service),
             chatbot_service: ChatbotService = Depends(ServiceFactory.get_chatbot_service),
+            conversation_service: ConversationService = Depends(ServiceFactory.get_conversation_service),
         ) -> StreamingResponse:
             """
             Endpoint to send a message.
@@ -76,19 +78,23 @@ class MessageController(BaseController):
                         model_id=message.model_id,
                         parent_message_id=message.parent_message_id,
                     )
-
+                    conversation = await conversation_service.summarize(
+                        conversation_id=conversation_id, user=user, user_message=user_message, agent_response=agent_response
+                    )
                     user_message, agent_response = await message_service.add_messages(user=user, user_message=user_message, agent_response=agent_response)
                     if not user_message.id:
                         raise ValueError("Message Id should not be null!")
                     response = MessageStreamFinalResponse(
+                        title=conversation.title,
+                        summary=conversation.summary,
                         message_id=user_message.id,
                         user_message=user_message.content,
                         agent_response=agent_response.content,
                     )
-
                     yield AgentStreamResponse(content=response.model_dump_json(), step=StreamStep.END).stream_response()
                 except Exception as e:
                     yield AgentStreamResponse(content=json.dumps({"error": str(e)}), step=StreamStep.ERROR).stream_response()
+                    raise e
 
             return StreamingResponse(_handle_streaming_response(), media_type="text/event-stream")
 

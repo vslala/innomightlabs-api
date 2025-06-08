@@ -14,13 +14,11 @@ class ConversationService:
 
     async def start_new_conversation(self, user: User) -> Conversation:
         """
-        Starts a new conversation for the given user ID.
-
-        Args:
-            user_id (str): The ID of the user starting the conversation.
-
-        Returns:
-            dict: A dictionary containing the status and message of the operation.
+        Starts a new conversation for the given user.
         """
         conversation = self.repository.create_conversation(user)
         return conversation
+
+    async def get_all_conversations(self, user: User) -> list[Conversation]:
+        conversations = self.repository.fetch_all_conversations_by_user(user=user)
+        return conversations

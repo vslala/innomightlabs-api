@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import Self
 from uuid import UUID
 from pydantic import BaseModel
+
+from app.conversation import Conversation
 
 
 class ConversationRequest(BaseModel):
@@ -20,6 +23,13 @@ class ConversationResponse(BaseModel):
     """
 
     id: UUID
+    title: str
     status: str
     created_at: datetime
     updated_at: datetime
+
+    @classmethod
+    def from_conversation(cls, conversation: Conversation) -> Self:
+        return cls(
+            id=conversation.id, title=conversation.title, status=conversation.status, created_at=conversation.created_at, updated_at=conversation.updated_at
+        )

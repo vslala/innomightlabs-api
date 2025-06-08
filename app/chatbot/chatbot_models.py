@@ -11,7 +11,7 @@ from app.common.models import Role
 class StreamStep(Enum):
     """Enum for different steps in the streaming process."""
 
-    THIKING = "thinking"
+    THOUGHT = "thought"
     FINAL_RESPONSE = "final_response"
     END = "end"
     ERROR = "error"

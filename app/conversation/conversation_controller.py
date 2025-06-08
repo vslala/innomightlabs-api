@@ -38,4 +38,18 @@ class ConversationController(BaseController):
             conversation: Conversation = await conversation_service.start_new_conversation(user=user)
             return ConversationResponse(**conversation.model_dump())
 
+        @self.api_router.get(
+            "",
+            response_model=list[Conversation],
+            responses={200: {"description": "Returns a list of conversation for the given user id in reverse chronological order"}},
+        )
+        async def get_conversations(
+            request: Request,
+            headers: Annotated[RequestHeaders, Header()],
+            conversation_service: ConversationService = Depends(ServiceFactory.get_conversation_service),
+        ) -> list[ConversationResponse]:
+            user = request.state.user
+            all_conversations = await conversation_service.get_all_conversations(user=user)
+            return [ConversationResponse.from_conversation(conversation=conversation) for conversation in all_conversations]
+
         return self.api_router

@@ -11,7 +11,13 @@ from app.common.models import Role
 class StreamStep(Enum):
     """Enum for different steps in the streaming process."""
 
-    THOUGHT = "thought"
+    ANALYSIS = "analysis"
+    PLANNING = "planning"
+    REASONING = "reasoning"
+    SYNTHESIS = "synthesis"
+    DRAFT = "draft"
+    EVALUATION = "evaluation"
+    REFINEMENT = "refinement"
     FINAL_RESPONSE = "final_response"
     END = "end"
     ERROR = "error"
@@ -22,6 +28,7 @@ class StreamChunk(TypedDict):
 
     content: str
     step: StreamStep
+    step_title: str | None
 
 
 class AgentMessage(BaseModel):
@@ -43,7 +50,19 @@ class AgentState(BaseModel):
     messages: list[AgentMessage]
     user_message: str
     agent_message: str = Field(default="")
-    scratchpad: str = Field(default="")
+
+    # Multi-step reasoning fields
+    analysis: str = Field(default="")
+    plan: str = Field(default="")
+    reasoning: str = Field(default="")
+    synthesis: str = Field(default="")
+
+    # Quality assurance fields
+    draft_response: str = Field(default="")
+    evaluation: str = Field(default="")
+    needs_refinement: bool = Field(default=True)
+    refinement_count: int = Field(default=0)
+
     stream_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
 
 

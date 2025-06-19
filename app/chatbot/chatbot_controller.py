@@ -6,8 +6,7 @@ from app.chatbot import BaseChatbot
 from app.common.config import ChatbotFactory
 from app.common.controller import BaseController
 from app.common.models import RequestHeaders
-from app.chatbot.chat_agent_workflow import AgenticWorkflow
-from app.chatbot.chatbot_models import AgentRequest, AgentState, AgentStreamResponse, StreamStep
+from app.chatbot.chatbot_models import AgentRequest
 
 
 class AgentController(BaseController):
@@ -40,23 +39,16 @@ class AgentController(BaseController):
             Endpoint to ask the chatbot a question.
             This endpoint initializes the agentic workflow and processes the user's request.
             """
-            state = AgentState(
-                messages=[request.message],
-                user_message=request.message,
-                agent_message="",
-                scratchpad="",
-                stream_queue=None,
-            )
-            agentic_workflow = AgenticWorkflow(state=state, chatbot=chatbot)
+            # Create service to handle the request
+            from app.chatbot.chatbot_services import ChatbotService
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+            embedding_model = GoogleGenerativeAIEmbeddings(model="embedding-001")
+            service = ChatbotService(chatbot=chatbot, embedding_model=embedding_model)
 
             async def response_streamer():
-                async for chunk in agentic_workflow.run():
-                    if chunk["step"] == StreamStep.THOUGHT:
-                        response = AgentStreamResponse(content=chunk["content"], step=chunk["step"])
-                        yield f"data: {response.model_dump_json()}\n\n"
-                    else:
-                        response = AgentStreamResponse(content=chunk["content"], step=chunk["step"])
-                        yield f"data: {response.model_dump_json()}\n\n"
+                async for response in service.ask_async(request):
+                    yield f"data: {response.model_dump_json()}\n\n"
 
             return StreamingResponse(response_streamer(), media_type="text/event-stream")
 

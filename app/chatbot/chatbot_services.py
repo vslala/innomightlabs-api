@@ -1,10 +1,9 @@
-import asyncio
 from typing import AsyncGenerator
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot
 from app.chatbot.chat_agent_workflow import AgenticWorkflow
-from app.chatbot.chatbot_models import AgentMessage, AgentMessageSummary, AgentRequest, AgentState, AgentStreamResponse, StreamChunk
+from app.chatbot.chatbot_models import AgentMessage, AgentMessageSummary, AgentRequest, AgentState, AgentStreamResponse
 
 
 class ChatbotService:
@@ -19,20 +18,16 @@ class ChatbotService:
 
     async def ask_async(self, request: AgentRequest) -> AsyncGenerator[AgentStreamResponse, None]:
         """Send a message to the chatbot and return the response."""
-        stream = asyncio.Queue[StreamChunk]()
         state = AgentState(
             messages=request.message_history,
             user_message=request.message,
-            agent_message="",
-            scratchpad="",
-            stream_queue=stream,
         )
         workflow = AgenticWorkflow(
             state=state,
             chatbot=self.chatbot,
         )
         async for chunk in workflow.run():
-            yield AgentStreamResponse(content=chunk["content"], step=chunk["step"])
+            yield AgentStreamResponse(content=chunk["content"], step=chunk["step"], timestamp=request.timestamp)
 
     async def generate_embedding(self, text: str) -> list[float]:
         """Generate an embedding for the given text."""

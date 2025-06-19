@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker, Session, scoped_session
 
 # set sql alchemy logs to only error
 logging.basicConfig()
-logging.getLogger('sqlalchemy').setLevel(logging.ERROR)
+logging.getLogger("sqlalchemy").setLevel(logging.ERROR)
 
 # 1) Read env vars once, build the URL once
 POSTGRES_USER = os.getenv("POSTGRES_USER")

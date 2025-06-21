@@ -1,26 +1,11 @@
 import asyncio
 from datetime import datetime, timezone
-from enum import Enum
 from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.common.models import Role
-
-
-class StreamStep(Enum):
-    """Enum for different steps in the streaming process."""
-
-    ANALYSIS = "analysis"
-    PLANNING = "planning"
-    REASONING = "reasoning"
-    SYNTHESIS = "synthesis"
-    DRAFT = "draft"
-    EVALUATION = "evaluation"
-    REFINEMENT = "refinement"
-    FINAL_RESPONSE = "final_response"
-    END = "end"
-    ERROR = "error"
+from app.common.models import Role, StreamStep
+from app.conversation.messages.message_models import AgentVersion
 
 
 class StreamChunk(TypedDict):
@@ -74,6 +59,7 @@ class AgentRequest(BaseModel):
 
     message_history: list[AgentMessage]
     message: str
+    version: AgentVersion = Field(default=AgentVersion.KRISHNA_MINI)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

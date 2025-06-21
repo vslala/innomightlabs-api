@@ -2,7 +2,6 @@ from typing import AsyncGenerator
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot
-from app.chatbot.chat_agent_workflow import AgenticWorkflow
 from app.chatbot.chatbot_models import AgentMessage, AgentMessageSummary, AgentRequest, AgentState, AgentStreamResponse
 
 
@@ -22,7 +21,10 @@ class ChatbotService:
             messages=request.message_history,
             user_message=request.message,
         )
-        workflow = AgenticWorkflow(
+        from app.common.config import WorkflowFactory
+
+        workflow = WorkflowFactory.create_workflow(
+            version=request.version,
             state=state,
             chatbot=self.chatbot,
         )

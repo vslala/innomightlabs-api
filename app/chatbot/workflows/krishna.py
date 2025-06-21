@@ -3,21 +3,14 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator
 from langgraph.graph import StateGraph, START, END
 
-from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import AgentMessage, AgentState, StreamChunk, StreamStep
+from app.chatbot.chatbot_models import AgentMessage, AgentState, StreamChunk
+from app.common.models import StreamStep
+from app.common.workflows import BaseAgentWorkflow
 from app.common.models import Role
 
 
-class AgenticWorkflow:
-    """Base class for agentic workflows."""
-
-    def __init__(
-        self,
-        state: AgentState,
-        chatbot: BaseChatbot,
-    ):
-        self.state = state
-        self.chatbot = chatbot
+class KrishnaWorkflow(BaseAgentWorkflow):
+    """Multi-step reasoning workflow with quality assurance."""
 
     async def run(self) -> AsyncGenerator[StreamChunk, None]:
         """Run the workflow."""
@@ -28,10 +21,8 @@ class AgenticWorkflow:
             """Drive the workflow and yield states."""
             state = self.state
             async for wrapped_state in app.astream(state):
-                # log for metrics and debugging
-                # print(f"State: {wrapped_state}")
                 pass
-            await self.state.stream_queue.put(None)  # Signal the end of the stream
+            await self.state.stream_queue.put(None)
 
         task = asyncio.create_task(drive_workflow())
         while True:
@@ -39,16 +30,11 @@ class AgenticWorkflow:
             if chunk is None:
                 break
             yield chunk
-
         await task
-
-    def _build_conversation_history(self) -> str:
-        """Build the conversation history from the state."""
-        return "\n".join(msg.get_formatted_prompt() for msg in self.state.messages)
 
     async def _analyze_query(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Analyze and understand the user's query."""
-        conversation_history = "\n".join(msg.get_formatted_prompt() for msg in state.messages)
+        conversation_history = self._build_conversation_history()
 
         analysis_prompt = f"""
         Analyze the following user query and conversation context:
@@ -57,9 +43,7 @@ class AgenticWorkflow:
         {conversation_history}
         
         [Current Query]
-        \"\"\"
-        {state.user_message}
-        \"\"\"
+        \"\"\"{state.user_message}\"\"\"
         
         Provide a brief analysis of:
         1. What the user is asking for
@@ -181,7 +165,6 @@ class AgenticWorkflow:
     async def _evaluate_quality(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Evaluate the quality of the draft response."""
         evaluation_prompt = f"""
-        
         Evaluate this draft response for the query: "{state.user_message}"
         
         DRAFT RESPONSE:
@@ -224,11 +207,7 @@ class AgenticWorkflow:
     async def _refine_response(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Refine the response based on evaluation feedback."""
         refinement_prompt = f"""
-        [Conversation History]
-        {self._build_conversation_history()}
-        
-        [Current User Message]
-        "{state.user_message}"
+        ORIGINAL QUERY: "{state.user_message}"
         
         CURRENT DRAFT:
         {state.draft_response}
@@ -263,21 +242,18 @@ class AgenticWorkflow:
 
     def _should_continue_refinement(self, state: AgentState) -> bool:
         """Determine if refinement should continue."""
-        max_refinements = 3  # Prevent infinite loops
+        max_refinements = 3
         return state.needs_refinement and getattr(state, "refinement_count", 0) < max_refinements
 
     async def _finalize_answer(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Finalize the approved response."""
-        # Send status message first
-        await self.state.stream_queue.put(StreamChunk(content="", step=StreamStep.FINAL_RESPONSE, step_title="Final Answer"))
+        await self.state.stream_queue.put(StreamChunk(content="✅ Response approved and ready!", step=StreamStep.FINAL_RESPONSE, step_title="Final Answer"))
 
-        # Use the refined/approved draft as final response
         state.agent_message = state.draft_response
 
-        # Stream the final response preserving line breaks and formatting
         lines = state.draft_response.split("\n")
         for line in lines:
-            if line.strip():  # Only send non-empty lines
+            if line.strip():
                 await self.state.stream_queue.put(StreamChunk(content=line + "\n", step=StreamStep.FINAL_RESPONSE, step_title=None))
             else:
                 await self.state.stream_queue.put(StreamChunk(content="\n", step=StreamStep.FINAL_RESPONSE, step_title=None))
@@ -290,7 +266,6 @@ class AgenticWorkflow:
         """Build the state graph with quality assurance loop."""
         graph = StateGraph(AgentState)
 
-        # Add all nodes (using unique names to avoid state field conflicts)
         graph.add_node("query_analysis", self._analyze_query)
         graph.add_node("approach_planning", self._plan_approach)
         graph.add_node("deep_reasoning", self._execute_reasoning)
@@ -300,7 +275,6 @@ class AgenticWorkflow:
         graph.add_node("response_refinement", self._refine_response)
         graph.add_node("answer_finalization", self._finalize_answer)
 
-        # Main reasoning pipeline
         graph.add_edge(START, "query_analysis")
         graph.add_edge("query_analysis", "approach_planning")
         graph.add_edge("approach_planning", "deep_reasoning")
@@ -308,7 +282,6 @@ class AgenticWorkflow:
         graph.add_edge("insight_synthesis", "response_drafting")
         graph.add_edge("response_drafting", "quality_evaluation")
 
-        # Quality assurance loop
         graph.add_conditional_edges("quality_evaluation", self._should_continue_refinement, {True: "response_refinement", False: "answer_finalization"})
         graph.add_edge("response_refinement", "quality_evaluation")
         graph.add_edge("answer_finalization", END)

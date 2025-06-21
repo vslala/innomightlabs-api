@@ -22,6 +22,21 @@ class Role(Enum):
     ASSISTANT = "assistant"
 
 
+class StreamStep(Enum):
+    """Enum for different steps in the streaming process."""
+
+    ANALYSIS = "analysis"
+    PLANNING = "planning"
+    REASONING = "reasoning"
+    SYNTHESIS = "synthesis"
+    DRAFT = "draft"
+    EVALUATION = "evaluation"
+    REFINEMENT = "refinement"
+    FINAL_RESPONSE = "final_response"
+    END = "end"
+    ERROR = "error"
+
+
 # Requests
 class RequestHeaders(BaseModel):
     x_forwarded_user: str

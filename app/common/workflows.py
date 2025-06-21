@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator
+from typing import AsyncGenerator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.chatbot.chatbot_models import StreamChunk
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import AgentState, StreamChunk
+from app.chatbot.chatbot_models import AgentState
 
 
 class BaseAgentWorkflow(ABC):
@@ -13,9 +16,10 @@ class BaseAgentWorkflow(ABC):
         self.chatbot = chatbot
 
     @abstractmethod
-    async def run(self) -> AsyncGenerator[StreamChunk, None]:
+    async def run(self) -> AsyncGenerator["StreamChunk", None]:
         """Run the workflow and yield stream chunks."""
         pass
+        yield  # This makes it an async generator
 
     def _build_conversation_history(self) -> str:
         """Build the conversation history from the state."""

@@ -247,7 +247,7 @@ class KrishnaWorkflow(BaseAgentWorkflow):
 
     async def _finalize_answer(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Finalize the approved response."""
-        await self.state.stream_queue.put(StreamChunk(content="✅ Response approved and ready!", step=StreamStep.FINAL_RESPONSE, step_title="Final Answer"))
+        await self.state.stream_queue.put(StreamChunk(content="", step=StreamStep.FINAL_RESPONSE, step_title="Final Answer"))
 
         state.agent_message = state.draft_response
 

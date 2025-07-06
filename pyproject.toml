@@ -6,9 +6,13 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.16.1",
+    "anthropic>=0.54.0",
     "behave[develop,toml]>=1.2.6",
     "fastapi[standard]>=0.115.12",
     "langchain>=0.3.25",
+    "langchain-anthropic>=0.3.15",
+    "langchain-aws>=0.2.26",
+    "langchain-community>=0.3.26",
     "langchain-google-genai>=2.1.5",
     "langgraph>=0.4.7",
     "pgvector>=0.4.1",
@@ -33,4 +37,9 @@ extend-select = ["E", "F"]
 [tool.pytest.ini_options]
 markers = [
     "asyncio: mark test as asyncio to run it with an event loop"
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
 ]

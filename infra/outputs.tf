@@ -22,3 +22,23 @@ output "aws_region" {
   description = "AWS Region"
   value       = data.aws_region.current.name
 }
+
+output "api_gateway_url" {
+  description = "API Gateway URL"
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
+output "lambda_function_name" {
+  description = "Lambda Function Name"
+  value       = aws_lambda_function.innomightlabs_api.function_name
+}
+
+output "aurora_cluster_endpoint" {
+  description = "Aurora cluster endpoint"
+  value       = aws_rds_cluster.innomightlabs_db.endpoint
+}
+
+output "aurora_cluster_id" {
+  description = "Aurora cluster identifier"
+  value       = aws_rds_cluster.innomightlabs_db.cluster_identifier
+}

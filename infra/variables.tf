@@ -31,3 +31,40 @@ variable "tags" {
     ManagedBy   = "terraform"
   }
 }
+
+# Lambda Environment Variables
+variable "postgres_host" {
+  description = "PostgreSQL host"
+  type        = string
+  default     = "localhost"
+}
+
+variable "postgres_port" {
+  description = "PostgreSQL port"
+  type        = string
+  default     = "5432"
+}
+
+variable "postgres_db" {
+  description = "PostgreSQL database name"
+  type        = string
+  default     = "innomightlabs"
+}
+
+variable "postgres_user" {
+  description = "PostgreSQL username"
+  type        = string
+  default     = "postgres"
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL password"
+  type        = string
+  sensitive   = true
+}
+
+variable "google_api_key" {
+  description = "Google API key"
+  type        = string
+  sensitive   = true
+}

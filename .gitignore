@@ -16,3 +16,6 @@ wheels/
 *.dat
 *.db
 flyway.log
+
+# Terraform Generated
+infra/.terraform

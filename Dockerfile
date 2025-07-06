@@ -5,14 +5,18 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY pyproject.toml ./
-RUN pip install -e .
+# Install uv
+RUN pip install uv
 
-# Copy application code
+# Copy project files
+COPY pyproject.toml ./
 COPY app/ ./app/
+
+# Install Python dependencies using uv
+RUN uv pip install --system .
 
 # Expose port
 EXPOSE 8000

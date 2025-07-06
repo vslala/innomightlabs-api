@@ -2,7 +2,7 @@ from functools import lru_cache
 import logging
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from app.chatbot import BaseChatbot, GeminiChatbot
+from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
 from app.chatbot.chatbot_models import AgentState
 from app.chatbot.chatbot_services import ChatbotService
 from app.chatbot.workflows.krishna import KrishnaWorkflow
@@ -81,7 +81,7 @@ class ServiceFactory:
     @lru_cache
     def get_chatbot_service() -> ChatbotService:
         chatbot_service = ChatbotService(
-            chatbot=ChatbotFactory.create_chatbot(owner="google", model_name="gemini-2.0-flash", temperature=0.0),
+            chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
             embedding_model=ChatbotFactory.get_embedding_model(),
         )
         return chatbot_service
@@ -125,7 +125,13 @@ class RepositoryFactory:
 class ChatbotFactory:
     @staticmethod
     def create_chatbot(owner: str, model_name: str, temperature: float = 0.0) -> BaseChatbot:
-        return GeminiChatbot(model_name=model_name, temperature=temperature)
+        if owner == "google":
+            return GeminiChatbot(model_name=model_name, temperature=temperature)
+
+        elif owner == "anthropic" and model_name == "sonnet3":
+            return ClaudeSonnetChatbot()
+
+        raise ValueError(f"Unknown chatbot: {owner} {model_name}")
 
     @staticmethod
     def get_embedding_model() -> GoogleGenerativeAIEmbeddings:

@@ -33,7 +33,7 @@ class AgentController(BaseController):
         async def ask_chatbot(
             request: AgentRequest,
             headers: Annotated[RequestHeaders, Header()],
-            chatbot: BaseChatbot = Depends(lambda: ChatbotFactory.create_chatbot("google", "gemini-2.0-flash")),
+            chatbot: BaseChatbot = Depends(lambda: ChatbotFactory.create_chatbot("anthropic", "sonnet-4")),
         ) -> StreamingResponse:
             """
             Endpoint to ask the chatbot a question.

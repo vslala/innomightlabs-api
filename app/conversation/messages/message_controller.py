@@ -14,6 +14,15 @@ from app.conversation.messages import Message
 from app.conversation.messages.message_services import MessageService
 from app.user import User
 import logging
+import sys
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 
 class MessageController(BaseController):
@@ -46,7 +55,7 @@ class MessageController(BaseController):
             This endpoint handles the logic for sending a message in a conversation.
             """
             user: User = request.state.user
-            logging.info(f"conversation_id: {conversation_id},\nuser: {user.model_dump_json},\nuser request: {message.model_dump_json()}")
+            logger.info(f"conversation_id: {conversation_id},\nuser: {user.model_dump_json},\nuser request: {message.model_dump_json()}")
             similar_messages = await message_service.get_conversation_history(conversation_id=conversation_id, message_content=message.content)
 
             async def _handle_streaming_response():
@@ -56,6 +65,7 @@ class MessageController(BaseController):
                         request=AgentRequest(
                             message_history=[AgentMessage(message=m.content, role=m.role, timestamp=m.updated_at) for m in similar_messages],
                             message=message.content,
+                            version=message.agent,
                         )
                     ):
                         print(chunk.content, end="")

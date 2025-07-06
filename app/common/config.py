@@ -1,5 +1,5 @@
 from functools import lru_cache
-import logging
+from sqlalchemy.orm import Session
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
@@ -7,6 +7,7 @@ from app.chatbot.chatbot_models import AgentState
 from app.chatbot.chatbot_services import ChatbotService
 from app.chatbot.workflows.krishna import KrishnaWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
+from app.common.db_connect import SessionLocal
 from app.common.repositories import TransactionManager
 from app.common.workflows import BaseAgentWorkflow
 from app.conversation.messages.message_models import AgentVersion
@@ -16,46 +17,13 @@ from app.user.user_services import UserService
 from app.user.user_repository import UserRepository
 from app.conversation.conversation_repositories import ConversationRepository
 from app.conversation.conversation_services import ConversationService
-import os
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session, scoped_session
-
-# set sql alchemy logs to only error
-logging.basicConfig()
-logging.getLogger("sqlalchemy").setLevel(logging.ERROR)
-
-# 1) Read env vars once, build the URL once
-POSTGRES_USER = os.getenv("POSTGRES_USER")
-POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB")
-
-if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
-    raise RuntimeError("Make sure POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB are set")
-
-DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-
-# 2) Create the engine once
-engine = create_engine(DATABASE_URL, echo=False, future=True)
-
-# 3) Create a Session factory once
-session_factory = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,  # often useful in web apps
-    future=True,
-)
-
-# 4) wrap in `scoped_session` for thread‐local sessions
-#    To call get_session() from different threads and for
-#    each thread to automatically re‐use its own session (instead of always
-#    having to pass the session object around), do this:
-SessionLocal = scoped_session(session_factory=session_factory)
 
 
+def get_session() -> Session:
+    return SessionLocal()
+
+
+# ----- Service and Repository Factories (unchanged) -----
 class SessionFactory:
     @staticmethod
     def get_session() -> Session:
@@ -66,35 +34,31 @@ class ServiceFactory:
     @staticmethod
     @lru_cache
     def get_conversation_service() -> ConversationService:
-        conversation_service = ConversationService(
+        return ConversationService(
             conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service()
         )
-        return conversation_service
 
     @staticmethod
     @lru_cache
     def get_user_service() -> UserService:
-        user_service = UserService(RepositoryFactory.get_user_repository())
-        return user_service
+        return UserService(RepositoryFactory.get_user_repository())
 
     @staticmethod
     @lru_cache
     def get_chatbot_service() -> ChatbotService:
-        chatbot_service = ChatbotService(
+        return ChatbotService(
             chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
             embedding_model=ChatbotFactory.get_embedding_model(),
         )
-        return chatbot_service
 
     @staticmethod
     @lru_cache
     def get_message_service() -> MessageService:
-        message_service = MessageService(
+        return MessageService(
             RepositoryFactory.get_transaction_manager(),
             RepositoryFactory.get_message_repository(),
             ServiceFactory.get_chatbot_service(),
         )
-        return message_service
 
 
 class RepositoryFactory:
@@ -106,20 +70,17 @@ class RepositoryFactory:
     @staticmethod
     @lru_cache
     def get_conversation_repository() -> ConversationRepository:
-        conversation_repository = ConversationRepository(session=SessionFactory.get_session())
-        return conversation_repository
+        return ConversationRepository(session=SessionFactory.get_session())
 
     @staticmethod
     @lru_cache
     def get_user_repository() -> UserRepository:
-        user_repository = UserRepository(session=SessionFactory.get_session())
-        return user_repository
+        return UserRepository(session=SessionFactory.get_session())
 
     @staticmethod
     @lru_cache
     def get_message_repository() -> MessageRepository:
-        message_repository = MessageRepository(session=SessionFactory.get_session())
-        return message_repository
+        return MessageRepository(session=SessionFactory.get_session())
 
 
 class ChatbotFactory:
@@ -127,10 +88,8 @@ class ChatbotFactory:
     def create_chatbot(owner: str, model_name: str, temperature: float = 0.0) -> BaseChatbot:
         if owner == "google":
             return GeminiChatbot(model_name=model_name, temperature=temperature)
-
         elif owner == "anthropic" and model_name == "sonnet3":
             return ClaudeSonnetChatbot()
-
         raise ValueError(f"Unknown chatbot: {owner} {model_name}")
 
     @staticmethod
@@ -139,20 +98,18 @@ class ChatbotFactory:
 
 
 class WorkflowFactory:
-    """Factory class to create different agent workflows."""
-
-    _workflows: dict[AgentVersion, type[BaseAgentWorkflow]] = {AgentVersion.KRISHNA_MINI: KrishnaMiniWorkflow, AgentVersion.KRISHNA: KrishnaWorkflow}
+    _workflows: dict[AgentVersion, type[BaseAgentWorkflow]] = {
+        AgentVersion.KRISHNA_MINI: KrishnaMiniWorkflow,
+        AgentVersion.KRISHNA: KrishnaWorkflow,
+    }
 
     @classmethod
     def create_workflow(cls, version: AgentVersion, state: AgentState, chatbot: BaseChatbot) -> BaseAgentWorkflow:
-        """Create a workflow instance based on version."""
         if version not in cls._workflows:
             raise ValueError(f"Unknown workflow version: {version}. Available: {list(cls._workflows.keys())}")
-
         workflow_class = cls._workflows[version]
         return workflow_class(state, chatbot)
 
     @classmethod
     def get_available_versions(cls) -> list[AgentVersion]:
-        """Get list of available workflow versions."""
         return list(cls._workflows.keys())

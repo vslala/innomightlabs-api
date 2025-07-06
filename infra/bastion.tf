@@ -1,0 +1,1 @@
+# No bastion host needed - Aurora DSQL accessed via IAM authentication

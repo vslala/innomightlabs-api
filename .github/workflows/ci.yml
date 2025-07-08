@@ -85,8 +85,16 @@ jobs:
       - name: Start FastAPI (background) & health check
         run: |
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-          sleep 5
-          curl -f http://127.0.0.1:8000/docs || exit 1
+          for i in {1..5}; do
+            echo "Health check attempt $i/5..."
+            if curl -f http://127.0.0.1:8000/docs; then
+              echo "FastAPI is healthy!"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "FastAPI failed to start after 5 attempts"
+          exit 1
 
   deploy:
     name: Deploy to ECR
@@ -139,6 +147,7 @@ jobs:
       working-directory: infra
       run: |
         terraform init
+        terraform refresh
         terraform plan -out=tfplan
         terraform apply -auto-approve tfplan
 

@@ -41,11 +41,12 @@ async def run_migrations():
 
 asgi_handler = Mangum(app)
 
+
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler function"""
     headers = event.get("headers", {})
     user_agent = headers.get("User-Agent", headers.get("user-agent", ""))
-    
+
     logger_context = {
         "request_id": context.aws_request_id,
         "user_agent": user_agent,
@@ -53,7 +54,7 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
         "httpMethod": event.get("httpMethod", ""),
         "path": event.get("path", ""),
     }
-    
+
     with logger.contextualize(**logger_context):
         logger.info("Request received", event=event, context=context)
         response = asgi_handler(event, context)

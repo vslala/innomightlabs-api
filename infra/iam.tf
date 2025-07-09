@@ -58,6 +58,33 @@ resource "aws_iam_role_policy_attachment" "lambda_bedrock" {
   role       = aws_iam_role.lambda_execution.name
 }
 
+# Secrets Manager access policy for Lambda
+resource "aws_iam_policy" "lambda_secrets_access" {
+  name        = "${var.project_name}-lambda-secrets-access"
+  description = "Policy for Lambda to access Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = aws_secretsmanager_secret.aurora_credentials.arn
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# Attach Secrets Manager policy to Lambda role
+resource "aws_iam_role_policy_attachment" "lambda_secrets" {
+  policy_arn = aws_iam_policy.lambda_secrets_access.arn
+  role       = aws_iam_role.lambda_execution.name
+}
+
 # GitHub OIDC Provider
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
@@ -131,7 +158,8 @@ resource "aws_iam_policy" "github_actions_access" {
           "apigateway:*",
           "logs:*",
           "ec2:*",
-          "rds:*"
+          "rds:*",
+          "secretsmanager:*"
         ]
         Resource = "*"
       },
@@ -143,6 +171,7 @@ resource "aws_iam_policy" "github_actions_access" {
         Resource = [
           "arn:aws:iam::*:role/${var.project_name}-*",
           "arn:aws:iam::*:policy/${var.project_name}-*",
+          "arn:aws:iam::*:instance-profile/${var.project_name}-*",
           "arn:aws:iam::*:oidc-provider/token.actions.githubusercontent.com"
         ]
       }

@@ -30,13 +30,34 @@ for controller in get_controllers():
 @app.post("/migrate")
 async def run_migrations():
     """Run database migrations"""
-    import subprocess
-
     try:
-        result = subprocess.run(["alembic", "upgrade", "head"], capture_output=True, text=True, check=True)
-        return {"status": "success", "output": result.stdout}
-    except subprocess.CalledProcessError as e:
-        return {"status": "error", "output": e.stderr}
+        from alembic.config import Config
+        from alembic import command
+        import io
+        import sys
+
+        # Capture output
+        output = io.StringIO()
+
+        # Create alembic config with absolute path
+        import os
+
+        config_path = os.path.join(os.getcwd(), "alembic.ini")
+        alembic_cfg = Config(config_path)
+
+        # Redirect stdout to capture output
+        old_stdout = sys.stdout
+        sys.stdout = output
+
+        try:
+            command.upgrade(alembic_cfg, "head")
+            result = output.getvalue()
+            return {"status": "success", "output": result}
+        finally:
+            sys.stdout = old_stdout
+
+    except Exception as e:
+        return {"status": "error", "output": str(e)}
 
 
 asgi_handler = Mangum(app)
@@ -44,6 +65,7 @@ asgi_handler = Mangum(app)
 
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler function"""
+    logger.info("Lambda handler invoked", event=event, context=context)
     headers = event.get("headers", {})
     user_agent = headers.get("User-Agent", headers.get("user-agent", ""))
 

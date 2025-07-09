@@ -39,6 +39,8 @@ RUN mkdir -p /root/.cache/uv \
     uv pip install -r requirements.txt --target ./
 
 COPY ./app ./app
+COPY ./migrations ./migrations
+COPY ./alembic.ini ./alembic.ini
 
 # Lambda entrypoint
 CMD ["app.main.handler"]

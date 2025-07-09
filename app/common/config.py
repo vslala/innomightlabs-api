@@ -18,65 +18,83 @@ from app.conversation.conversation_repositories import ConversationRepository
 from app.conversation.conversation_services import ConversationService
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine.url import URL
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
+import boto3
 
 # set sql alchemy logs to only error
 logging.basicConfig()
 logging.getLogger("sqlalchemy").setLevel(logging.ERROR)
 
 # 1) Read env vars and build DATABASE_URL
-STAGE = os.getenv("STAGE")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+STAGE = os.getenv("STAGE", "local").lower()
 
-if STAGE == "dev":
-    # Use Secrets Manager for dev stage
-    import boto3
-    import json
 
-    secrets_client = boto3.client("secretsmanager", region_name=os.getenv("AWS_REGION", "us-east-1"))
-    secret_name = os.getenv("SECRET_NAME", "innomightlabs-api-aurora-postgres-credentials")
+def make_db_url():
+    if STAGE == "dev":
+        token = boto3.client("rds", region_name=AWS_REGION).generate_db_auth_token(
+            DBHostname=POSTGRES_HOST,
+            Port=int(POSTGRES_PORT),
+            DBUsername=POSTGRES_USER,
+        )
+        return URL.create(
+            "postgresql+psycopg2",
+            username=POSTGRES_USER,
+            password=token,
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+            query={"sslmode": "require"},
+        )
+    else:
+        return URL.create(
+            "postgresql+psycopg2",
+            username=POSTGRES_USER,
+            password=os.getenv("POSTGRES_PASSWORD"),
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+        )
 
-    try:
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret = json.loads(response["SecretString"])
 
-        POSTGRES_USER = secret["username"]
-        POSTGRES_PASS = secret["password"]
-        POSTGRES_HOST = secret["host"]
-        POSTGRES_PORT = str(secret["port"])
-        POSTGRES_DB = secret["dbname"]
-    except Exception as e:
-        raise RuntimeError(f"Failed to retrieve database credentials from Secrets Manager: {e}")
-else:
-    # Use environment variables for other stages
-    POSTGRES_USER = os.getenv("POSTGRES_USER")
-    POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
-    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-    POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-    POSTGRES_DB = os.getenv("POSTGRES_DB")
+# 1) Build engine once
+engine = create_engine(make_db_url(), pool_pre_ping=True, future=True)
 
-    if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
-        raise RuntimeError("Make sure POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB are set")
+# 2) If IAM, inject fresh token on each new connection
+if STAGE:
 
-DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    @event.listens_for(engine, "do_connect")
+    def refresh_token(dialect, conn_rec, cargs, cparams):
+        fresh = make_db_url()
+        cparams.update(
+            {
+                "username": fresh.username,
+                "password": fresh.password,
+            }
+        )
+        return dialect.connect(*cargs, **cparams)
 
-# 2) Create the engine once
-engine = create_engine(DATABASE_URL, echo=False, future=True)
 
-# 3) Create a Session factory once
-session_factory = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,  # often useful in web apps
-    future=True,
+# 3) Session factory
+SessionLocal = scoped_session(
+    sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
 )
 
-# 4) wrap in `scoped_session` for thread‐local sessions
-#    To call get_session() from different threads and for
-#    each thread to automatically re‐use its own session (instead of always
-#    having to pass the session object around), do this:
-SessionLocal = scoped_session(session_factory=session_factory)
+
+def get_session():
+    return SessionLocal()
 
 
 class SessionFactory:

@@ -1,8 +1,9 @@
 from logging.config import fileConfig
 import os
-
+import boto3
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.engine.url import URL
 
 from alembic import context
 
@@ -15,22 +16,47 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-
-# Build the URL here using real environment variables
+STAGE         = os.getenv("STAGE", "local").lower()
+AWS_REGION    = os.getenv("AWS_REGION", "us-east-1")
 POSTGRES_USER = os.getenv("POSTGRES_USER")
-POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_DB   = os.getenv("POSTGRES_DB")
 
-if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
-    raise RuntimeError("Make sure POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB are set in your environment.")
+def make_db_url() -> URL:
+    """
+    Build the SQLAlchemy URL.  Pass raw POSTGRES_PASSWORD or IAM token
+    to URL.create(), letting SQLAlchemy do the necessary percent-escaping.
+    """
+    if STAGE == "dev":
+        token = boto3.client("rds", region_name=AWS_REGION) \
+                      .generate_db_auth_token(
+                          DBHostname=POSTGRES_HOST,
+                          Port=POSTGRES_PORT,
+                          DBUsername=POSTGRES_USER,
+                      )
+        password = token
+        query = {"sslmode": "require"}
+    else:
+        password = os.getenv("POSTGRES_PASSWORD")
+        if not password:
+            raise RuntimeError("POSTGRES_PASSWORD must be set in non-dev")
+        query = {}
 
-full_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    return URL.create(
+        drivername="postgresql+psycopg2",
+        username=POSTGRES_USER,
+        password=password,       # <-- raw, not pre-quoted
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        database=POSTGRES_DB,
+        query=query,
+    )
 
+full_url = make_db_url()
 # Override the sqlalchemy.url that alembic.ini had (if any)
 # Escape every '%' by doubling it, so configparser won’t try interpolation:
-escaped_url = full_url.replace("%", "%%")
+escaped_url = full_url.render_as_string(hide_password=False).replace("%", "%%")
 config.set_main_option("sqlalchemy.url", escaped_url)
 
 # add your model's MetaData object here

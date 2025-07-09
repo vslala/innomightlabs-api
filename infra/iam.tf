@@ -85,6 +85,32 @@ resource "aws_iam_role_policy_attachment" "lambda_secrets" {
   role       = aws_iam_role.lambda_execution.name
 }
 
+# RDS IAM authentication policy for Lambda
+resource "aws_iam_policy" "lambda_rds_connect" {
+  name        = "${var.project_name}-lambda-rds-connect"
+  description = "Policy for Lambda to connect to RDS using IAM authentication"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${aws_rds_cluster.innomightlabs_db.cluster_identifier}/${var.postgres_user}"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_rds_connect" {
+  policy_arn = aws_iam_policy.lambda_rds_connect.arn
+  role       = aws_iam_role.lambda_execution.name
+}
+
 # GitHub OIDC Provider
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"

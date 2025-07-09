@@ -27,6 +27,8 @@ resource "aws_lambda_function" "innomightlabs_api" {
       POSTGRES_USER     = aws_rds_cluster.innomightlabs_db.master_username
       POSTGRES_PASSWORD = var.postgres_password
       GOOGLE_API_KEY    = var.google_api_key
+      SECRET_NAME       = aws_secretsmanager_secret.aurora_credentials.name
+      STAGE             = var.stage
     }
   }
 

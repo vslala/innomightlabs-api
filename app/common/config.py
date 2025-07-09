@@ -25,15 +25,38 @@ from sqlalchemy.orm import sessionmaker, Session, scoped_session
 logging.basicConfig()
 logging.getLogger("sqlalchemy").setLevel(logging.ERROR)
 
-# 1) Read env vars once, build the URL once
-POSTGRES_USER = os.getenv("POSTGRES_USER")
-POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB")
+# 1) Read env vars and build DATABASE_URL
+STAGE = os.getenv("STAGE")
 
-if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
-    raise RuntimeError("Make sure POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB are set")
+if STAGE == "dev":
+    # Use Secrets Manager for dev stage
+    import boto3
+    import json
+
+    secrets_client = boto3.client("secretsmanager", region_name=os.getenv("AWS_REGION", "us-east-1"))
+    secret_name = os.getenv("SECRET_NAME", "innomightlabs-api-aurora-postgres-credentials")
+
+    try:
+        response = secrets_client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(response["SecretString"])
+
+        POSTGRES_USER = secret["username"]
+        POSTGRES_PASS = secret["password"]
+        POSTGRES_HOST = secret["host"]
+        POSTGRES_PORT = str(secret["port"])
+        POSTGRES_DB = secret["dbname"]
+    except Exception as e:
+        raise RuntimeError(f"Failed to retrieve database credentials from Secrets Manager: {e}")
+else:
+    # Use environment variables for other stages
+    POSTGRES_USER = os.getenv("POSTGRES_USER")
+    POSTGRES_PASS = os.getenv("POSTGRES_PASSWORD")
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+    POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+    POSTGRES_DB = os.getenv("POSTGRES_DB")
+
+    if not all([POSTGRES_USER, POSTGRES_PASS, POSTGRES_DB]):
+        raise RuntimeError("Make sure POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB are set")
 
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 

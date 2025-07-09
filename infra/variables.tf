@@ -68,3 +68,9 @@ variable "google_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "stage" {
+  description = "Stage of the deployment (e.g., dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}

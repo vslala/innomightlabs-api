@@ -98,7 +98,7 @@ resource "aws_iam_policy" "lambda_rds_connect" {
         Action = [
           "rds-db:connect"
         ]
-        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${aws_rds_cluster.innomightlabs_db.cluster_identifier}/${var.postgres_user}"
+        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${aws_rds_cluster.innomightlabs_db.cluster_identifier}/iam_db_user"
       }
     ]
   })

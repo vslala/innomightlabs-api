@@ -12,7 +12,10 @@ resource "aws_lambda_function" "innomightlabs_api" {
   timeout          = 60
   memory_size      = 1024
 
-  # <-- No vpc_config here!
+  vpc_config {
+    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
 
   environment {
     variables = {
@@ -21,6 +24,7 @@ resource "aws_lambda_function" "innomightlabs_api" {
       POSTGRES_USER     = var.postgres_user
       POSTGRES_PASSWORD = var.postgres_password
       POSTGRES_DB       = var.postgres_db
+      STAGE             = var.stage
     }
   }
 

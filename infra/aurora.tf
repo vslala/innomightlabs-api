@@ -1,9 +1,9 @@
-# DB Subnet Group — public subnets
+# DB Subnet Group — private subnets
 resource "aws_db_subnet_group" "innomightlabs_db" {
   name       = "${var.project_name}-db-subnet-group"
   subnet_ids = [
-    aws_subnet.public_a.id,
-    aws_subnet.public_b.id,
+    aws_subnet.private_a.id,
+    aws_subnet.private_b.id,
   ]
   tags = var.tags
 }
@@ -42,7 +42,7 @@ resource "aws_rds_cluster_instance" "innomightlabs_instance" {
   engine             = aws_rds_cluster.innomightlabs_db.engine
   engine_version     = aws_rds_cluster.innomightlabs_db.engine_version
 
-  publicly_accessible = true
+  publicly_accessible = false
 
   tags = var.tags
 }

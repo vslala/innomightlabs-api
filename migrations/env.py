@@ -45,7 +45,7 @@ def make_db_url() -> URL:
 
     return URL.create(
         drivername="postgresql+psycopg2",
-        username="iam_db_user",  # Use the database role name
+        username=POSTGRES_USER,
         password=password,
         host=POSTGRES_HOST,
         port=POSTGRES_PORT,

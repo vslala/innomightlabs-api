@@ -112,10 +112,10 @@ resource "aws_security_group" "lambda_sg" {
   tags = merge(var.tags, { Name = "${var.project_name}-lambda-sg" })
 }
 
-# Security Group for Aurora - only allows Lambda access
+# Security Group for Aurora - allows Lambda and Bastion access
 resource "aws_security_group" "aurora_sg" {
-  name        = "${var.project_name}-aurora-sg"
-  description = "Allow PostgreSQL access only from Lambda"
+  name_prefix = "${var.project_name}-aurora-sg-"
+  description = "Allow PostgreSQL access from Lambda and Bastion"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -124,6 +124,18 @@ resource "aws_security_group" "aurora_sg" {
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.lambda_sg.id]
+  }
+
+  ingress {
+    description     = "PostgreSQL from Bastion"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 
   tags = merge(var.tags, { Name = "${var.project_name}-aurora-sg" })

@@ -67,7 +67,7 @@ def make_db_url():
 engine = create_engine(make_db_url(), pool_pre_ping=True, future=True)
 
 # 2) If IAM, inject fresh token on each new connection
-if STAGE:
+if STAGE == "dev":
 
     @event.listens_for(engine, "do_connect")
     def refresh_token(dialect, conn_rec, cargs, cparams):

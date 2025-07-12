@@ -16,12 +16,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-STAGE         = os.getenv("STAGE", "local").lower()
-AWS_REGION    = os.getenv("AWS_REGION", "us-east-1")
+STAGE = os.getenv("STAGE", "local").lower()
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
-POSTGRES_DB   = os.getenv("POSTGRES_DB")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+
 
 def make_db_url() -> URL:
     """
@@ -29,12 +30,11 @@ def make_db_url() -> URL:
     to URL.create(), letting SQLAlchemy do the necessary percent-escaping.
     """
     if STAGE == "dev":
-        token = boto3.client("rds", region_name=AWS_REGION) \
-                      .generate_db_auth_token(
-                          DBHostname=POSTGRES_HOST,
-                          Port=POSTGRES_PORT,
-                          DBUsername=POSTGRES_USER,
-                      )
+        token = boto3.client("rds", region_name=AWS_REGION).generate_db_auth_token(
+            DBHostname=POSTGRES_HOST,
+            Port=POSTGRES_PORT,
+            DBUsername=POSTGRES_USER,
+        )
         password = token
         query = {"sslmode": "require"}
     else:
@@ -45,13 +45,14 @@ def make_db_url() -> URL:
 
     return URL.create(
         drivername="postgresql+psycopg2",
-        username=POSTGRES_USER,
-        password=password,       # <-- raw, not pre-quoted
+        username="iam_db_user",  # Use the database role name
+        password=password,
         host=POSTGRES_HOST,
         port=POSTGRES_PORT,
         database=POSTGRES_DB,
         query=query,
     )
+
 
 full_url = make_db_url()
 # Override the sqlalchemy.url that alembic.ini had (if any)

@@ -76,7 +76,12 @@ resource "aws_iam_policy" "github_actions_policy" {
           "rds:*",
           "dsql:*",
           "secretsmanager:*",
-          "dynamodb:*"
+          "dynamodb:*",
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:ReEncrypt*"
         ]
         Resource = "*"
       },

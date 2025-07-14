@@ -15,7 +15,7 @@ resource "aws_apigatewayv2_api" "innomightlabs_api" {
 resource "aws_apigatewayv2_integration" "lambda" {
   api_id           = aws_apigatewayv2_api.innomightlabs_api.id
   integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.innomightlabs_api.invoke_arn
+  integration_uri  = module.api_lambda.innomightlabs_api_lambda_invoke_arn
 }
 
 resource "aws_apigatewayv2_route" "proxy" {
@@ -34,7 +34,7 @@ resource "aws_apigatewayv2_stage" "default" {
 resource "aws_lambda_permission" "api_gateway" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.innomightlabs_api.function_name
+  function_name = module.api_lambda.innomightlabs_api_lambda_function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.innomightlabs_api.execution_arn}/*/*"
 }

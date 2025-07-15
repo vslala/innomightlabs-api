@@ -114,6 +114,7 @@ resource "aws_lambda_function" "innomightlabs_api" {
       POSTGRES_DB       = var.api_lambda_variables.postgres_db
       STAGE             = var.api_lambda_variables.stage
       REGION            = var.api_lambda_variables.aws_region
+      GOOGLE_API_KEY    = var.api_lambda_variables.google_api_key
     }
   }
 

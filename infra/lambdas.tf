@@ -8,6 +8,7 @@ module "api_lambda" {
     aws_region                  = var.aws_region
     postgres_user              = var.postgres_user
     postgres_db                = var.postgres_db
+    google_api_key             = var.google_api_key
     stage                      = var.stage
     tags                       = var.tags
     dsql_cluster_arn           = aws_dsql_cluster.innomightlabs_db.arn

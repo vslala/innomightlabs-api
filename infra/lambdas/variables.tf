@@ -5,6 +5,7 @@ variable "api_lambda_variables" {
     aws_region                  = string
     postgres_user              = string
     postgres_db                = string
+    google_api_key             = string
     stage                      = string
     tags                       = map(string)
     dsql_cluster_arn           = string

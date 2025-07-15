@@ -44,12 +44,19 @@ class GeminiChatbot(BaseChatbot):
 
 class ClaudeSonnetChatbot(BaseChatbot):
     def __init__(self, temperature: float = 0):
-        self.llm = ChatBedrock(
-            model="anthropic.claude-3-sonnet-20240229-v1:0",
-            model_kwargs={"temperature": temperature},
-            credentials_profile_name=os.getenv("AWS_PROFILE", "searchexpert"),
-            region=os.getenv("AWS_REGION", "us-east-1"),
-        )
+        stage = os.getenv("STAGE", "local").lower()
+
+        bedrock_kwargs = {
+            "model": "anthropic.claude-3-sonnet-20240229-v1:0",
+            "model_kwargs": {"temperature": temperature},
+            "region": os.getenv("AWS_REGION", "us-east-1"),
+        }
+
+        # Only use profile for local development
+        if stage == "local":
+            bedrock_kwargs["credentials_profile_name"] = os.getenv("AWS_PROFILE", "searchexpert")
+
+        self.llm = ChatBedrock(**bedrock_kwargs)
 
     def get_text_response(self, prompt: str) -> str:
         response = self.llm.invoke(prompt)

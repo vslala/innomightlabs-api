@@ -96,7 +96,7 @@ resource "aws_lambda_function" "innomightlabs_api" {
   package_type     = "Image"
   image_uri        = "${var.api_lambda_variables.ecr_repository_url}:latest"
   source_code_hash = data.aws_ecr_image.innomightlabs_api.image_digest
-  timeout          = 60
+  timeout          = 900
   memory_size      = 1024
 
   vpc_config {

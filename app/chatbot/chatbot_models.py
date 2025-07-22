@@ -1,11 +1,45 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.models import Role, StreamStep
 from app.conversation.messages.message_models import AgentVersion
+
+
+class ActionResult(BaseModel):
+    """
+    Represents the result of an action taken by the agent.
+    """
+
+    action: str
+    result: str
+
+
+class Action(BaseModel):
+    """
+    Represents an action to be taken by the agent.
+    """
+
+    tool: str
+    description: str = Field(default="")
+    params: dict[str, Any]
+
+    def __str__(self) -> str:
+        return f"Action(tool={self.tool}, description={self.description}, params={self.params})"
+
+
+class AgentThought(BaseModel):
+    """
+    Represents the thought process of the agent.
+    """
+
+    thought: str
+    action: Action
+
+    def __str__(self) -> str:
+        return f"Thought(thought={self.thought}, action={self.action})"
 
 
 class StreamChunk(TypedDict):
@@ -38,7 +72,9 @@ class AgentState(BaseModel):
 
     # Multi-step reasoning fields
     analysis: str = Field(default="")
-    plan: str = Field(default="")
+    thoughts: list[AgentThought] = Field(default=[])
+    observations: list[str] = Field(default=[])
+
     reasoning: str = Field(default="")
     synthesis: str = Field(default="")
 
@@ -49,6 +85,10 @@ class AgentState(BaseModel):
     refinement_count: int = Field(default=0)
 
     stream_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
+
+    def build_conversation_history(self) -> str:
+        """Build the conversation history from the state."""
+        return "\n".join(msg.get_formatted_prompt() for msg in self.messages)
 
 
 # Requests

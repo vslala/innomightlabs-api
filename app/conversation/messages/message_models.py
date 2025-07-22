@@ -3,7 +3,6 @@ import enum
 from uuid import UUID
 from pydantic import BaseModel, Field
 
-from app.chatbot.chatbot_models import StreamStep
 from app.common.models import Role
 
 
@@ -15,6 +14,7 @@ class AgentVersion(enum.Enum):
     KRISHNA = "krishna"
     KRISHNA_MINI = "krishna-mini"
     KRISHNA_PRO = "krishna-pro"
+    KRISHNA_ADVANCE = "krishna-advance"
     KRISHNA_CODE = "krishna-code"
 
 
@@ -42,14 +42,4 @@ class MessageStreamFinalResponse(BaseModel):
     message_id: UUID
     user_message: str
     agent_response: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class MessageStreamResponse(BaseModel):
-    """
-    Represents a streamed response from an agent.
-    """
-
-    content: str
-    step: StreamStep
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

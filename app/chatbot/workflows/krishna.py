@@ -85,14 +85,14 @@ class KrishnaWorkflow(BaseAgentWorkflow):
             yield state
             await asyncio.sleep(0.1)
 
-        state.plan = plan_content
+        state.thoughts = plan_content
 
     async def _execute_reasoning(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Execute the reasoning process step by step."""
         reasoning_prompt = f"""
         Analysis: {state.analysis}
         
-        Plan: {state.plan}
+        Plan: {state.thoughts}
         
         Now execute this plan step by step to answer: "{state.user_message}"
         
@@ -140,7 +140,7 @@ class KrishnaWorkflow(BaseAgentWorkflow):
         Based on the complete reasoning process:
         
         Analysis: {state.analysis}
-        Plan: {state.plan}
+        Plan: {state.thoughts}
         Reasoning: {state.reasoning}
         Insights: {state.synthesis}
         

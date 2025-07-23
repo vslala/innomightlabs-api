@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, TypedDict
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,21 +13,27 @@ class ActionResult(BaseModel):
     Represents the result of an action taken by the agent.
     """
 
+    timestamp: datetime = Field(default=datetime.now(timezone.utc))
+    thought: str
     action: str
     result: str
+
+    def __str__(self) -> str:
+        return f"""
+        Thought: {self.thought}
+        Action: {self.action}
+        Result: {self.result}
+    """
 
 
 class Action(BaseModel):
     """
-    Represents an action to be taken by the agent.
+    Performs the action and returns the output of that action
     """
 
-    tool: str
-    description: str = Field(default="")
-    params: dict[str, Any]
-
-    def __str__(self) -> str:
-        return f"Action(tool={self.tool}, description={self.description}, params={self.params})"
+    name: str = Field(default="", description="Name of the action to choose")
+    description: str = Field(default="", description="Explanation of what this action do")
+    params: dict[str, Any] = Field(default={}, description="Input parameters for the action (if any)")
 
 
 class AgentThought(BaseModel):
@@ -35,25 +41,25 @@ class AgentThought(BaseModel):
     Represents the thought process of the agent.
     """
 
-    thought: str
-    action: Action
+    thought: str = Field(default="", description="Reason behind the action taken")
+    action: Action = Field(description="Action associated with this thought")
 
     def __str__(self) -> str:
-        return f"Thought(thought={self.thought}, action={self.action})"
+        return self.model_dump_json()
 
 
-class StreamChunk(TypedDict):
+class StreamChunk(BaseModel):
     """Represents a chunk of streamed data."""
 
     content: str
     step: StreamStep
-    step_title: str | None
+    step_title: str
 
 
 class AgentMessage(BaseModel):
     message: str
     role: Role
-    timestamp: datetime
+    timestamp: datetime = Field(default=datetime.now(timezone.utc))
 
     def get_formatted_prompt(self) -> str:
         ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M")
@@ -69,11 +75,12 @@ class AgentState(BaseModel):
     messages: list[AgentMessage]
     user_message: str
     agent_message: str = Field(default="")
+    prompt: str = Field(default="")
 
     # Multi-step reasoning fields
     analysis: str = Field(default="")
     thoughts: list[AgentThought] = Field(default=[])
-    observations: list[str] = Field(default=[])
+    observations: list[ActionResult] = Field(default=[])
 
     reasoning: str = Field(default="")
     synthesis: str = Field(default="")
@@ -84,11 +91,26 @@ class AgentState(BaseModel):
     needs_refinement: bool = Field(default=True)
     refinement_count: int = Field(default=0)
 
-    stream_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
+    retry: int = Field(default=0)
+
+    stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
 
     def build_conversation_history(self) -> str:
         """Build the conversation history from the state."""
         return "\n".join(msg.get_formatted_prompt() for msg in self.messages)
+
+    def build_observation(self, limit: int = 3) -> str:
+        """Build the observation from the state."""
+        if not self.observations:
+            return ""
+        n = len(self.observations)
+        observations = self.observations[:-limit] if n > 3 else self.observations
+        prompt = "\n# OBSERVATIONS\n\n"
+        prompt += "Below are the observations/result of your previous actions:"
+        for idx, obs in enumerate(observations):
+            prompt += f"## Observation {(idx + 1)}.\n"
+            prompt += f"{obs}\n\n"
+        return prompt
 
 
 # Requests

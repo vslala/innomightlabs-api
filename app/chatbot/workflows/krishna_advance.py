@@ -27,14 +27,16 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         """
         helper = KrishnaAdvanceWorkflowHelper(self.chatbot)
         graph = StateGraph(AgentState)
+        graph.add_node("prompt_builder", helper.prompt_builder)
         graph.add_node("thinker", helper.thinker)
+        graph.add_node("response_validator", helper.validate_response)
         graph.add_node("router", helper.router)
-        graph.add_node("final_response", helper.final_response)
 
-        graph.add_edge(START, "thinker")
-        graph.add_edge("thinker", "router")
-        graph.add_conditional_edges("router", route_condition, {"final_response": "final_response", "continue": "thinker"}, END)
-        graph.add_edge("final_response", END)
+        graph.add_edge(START, "prompt_builder")
+        graph.add_edge("prompt_builder", "thinker")
+        graph.add_edge("thinker", "response_validator")
+        graph.add_conditional_edges("response_validator", route_condition, {"final_response": END, "router": "router", "thinker": "thinker"}, END)
+        graph.add_conditional_edges("router", route_condition, {"final_response": END, "router": "prompt_builder", "thinker": "thinker"}, END)
 
         app = graph.compile()
 

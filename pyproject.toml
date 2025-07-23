@@ -32,7 +32,7 @@ where = ["."]
 include = ["app*"]
 
 [tool.ruff]
-line-length = 160
+line-length = 180
 
 [tool.ruff.lint]
 extend-select = ["E", "F"]

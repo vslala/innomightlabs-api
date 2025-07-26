@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 _shared_ns: dict = {}
 
 available_actions = [
-    Action(name="list_tools", description="List all available tools.", params={}),
+    Action(name="list_tools", description="Lists more tools from the registry.", params={}),
     Action(name="intermediate_response", description="Sends the intermediate response to the user from the params.", params={"text": "string"}),
     Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
     Action(name="python_runner", description="Run a Python code snippet.", params={"code_snippet": "string"}),
@@ -25,6 +25,11 @@ available_actions = [
         description="Fetches the webpage and saves it in local temporary memory and adds the path of the file to observations for later processing at will using python code",
         params={"url": "string"},
     ),
+    Action(
+        name="write_data_to_temp_memory",
+        description="writes the data to a temp file in the system temp and saves the path in the observations for later use",
+        params={"data": "string"},
+    ),
 ]
 
 
@@ -33,17 +38,46 @@ async def list_tools_tool(state: AgentState) -> ActionResult:
         return ActionResult(thought="", action="None", result="")
 
     tools = [
+        Action(name="list_tools", description="Lists more tools from the registry.", params={}),
+        Action(name="intermediate_response", description="Sends the intermediate response to the user from the params.", params={"text": "string"}),
+        Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
         Action(name="python_runner", description="Run a Python code snippet.", params={"code_snippet": "string"}),
         Action(name="wikipedia_search", description="Search Wikipedia and return a short summary.", params={"query": "string"}),
-        Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
         Action(
             name="fetch_webpage",
             description="Fetches the webpage and saves it in local temporary memory and adds the path of the file to observations for later processing at will using python code",
             params={"url": "string"},
         ),
+        Action(
+            name="write_data_to_temp_memory",
+            description="writes the data to a temp file in the system temp and saves the path in the observations for later use",
+            params={"data": "string"},
+        ),
     ]
 
     return ActionResult(thought=state.thought.thought, action="list_tools", result=json.dumps([str(tool) for tool in tools], indent=2))
+
+
+async def write_data_to_temp_memory(state: AgentState) -> ActionResult:
+    """
+    Tool: writes the data to a temp file in the system temp directory so it can be retrieved later
+    Returns the path of the file as observation
+    """
+    if not state.thought or (state.thought and state.thought.action.name != "write_data_to_temp_memory"):
+        return ActionResult(thought="", action="None", result="")
+
+    state.stream_queue.put_nowait(StreamChunk(content=f"{state.thought.thought}", step=StreamStep.ANALYSIS, step_title="Writing to temp memory"))
+    data = state.thought.action.params["data"]
+    # 1) Create a temp file in the system temp directory
+    #    delete=False so it sticks around after closing
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="data_", dir=None)
+    os.close(fd)
+
+    # 2) Write the data
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(data)
+
+    return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"filepath": path}))
 
 
 async def download_webpage_by_url(state: AgentState) -> ActionResult:
@@ -55,6 +89,7 @@ async def download_webpage_by_url(state: AgentState) -> ActionResult:
     if not state.thought or (state.thought and state.thought.action.name != "fetch_webpage"):
         return ActionResult(thought="", action="None", result="")
 
+    state.stream_queue.put_nowait(StreamChunk(content=f"{state.thought.thought}", step=StreamStep.ANALYSIS, step_title="Fetching Webpage"))
     url = state.thought.action.params["url"]
     # 1) fetch HTML
     async with aiohttp.ClientSession() as sess:
@@ -69,7 +104,7 @@ async def download_webpage_by_url(state: AgentState) -> ActionResult:
     # 2) Create a temp file in the system temp directory
     #    delete=False so it sticks around after closing
     fd, path = tempfile.mkstemp(suffix=".html", prefix="page_", dir=None)
-    os.close(fd) 
+    os.close(fd)
 
     # 3) Write the HTML
     with open(path, "w", encoding="utf-8") as f:
@@ -84,9 +119,8 @@ async def python_code_runner_tool(state: AgentState) -> ActionResult:
     :return: The result of the executed code.
     """
 
-    buf = io.StringIO()
-
     def _run():
+        buf = io.StringIO()
         with redirect_stdout(buf):
             exec(code_snippet, _shared_ns, _shared_ns)
         return buf.getvalue(), _shared_ns
@@ -182,4 +216,5 @@ tools = {
     "intermediate_response": intermediate_response_tool,
     "final_response": final_response_tool,
     "fetch_webpage": download_webpage_by_url,
+    "write_data_to_temp_memory": write_data_to_temp_memory,
 }

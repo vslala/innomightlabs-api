@@ -1,12 +1,12 @@
 from typing import AsyncGenerator
 
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentMessage, AgentMessageSummary, AgentRequest, AgentState, AgentStreamResponse
+from app.common.vector_embedders import BaseVectorEmbedder
 
 
 class ChatbotService:
-    def __init__(self, chatbot: BaseChatbot, embedding_model: GoogleGenerativeAIEmbeddings) -> None:
+    def __init__(self, chatbot: BaseChatbot, embedding_model: BaseVectorEmbedder) -> None:
         self.chatbot = chatbot
         self.embedding_model = embedding_model
 
@@ -29,13 +29,15 @@ class ChatbotService:
             chatbot=self.chatbot,
         )
         async for chunk in workflow.run():
-            yield AgentStreamResponse(content=chunk["content"], step=chunk["step"], timestamp=request.timestamp)
+            yield AgentStreamResponse(content=chunk.content, step=chunk.step, timestamp=request.timestamp)
 
     async def generate_embedding(self, text: str) -> list[float]:
         """Generate an embedding for the given text."""
         from asyncio import to_thread
 
-        return await to_thread(self.embedding_model.embed_query, text, output_dimensionality=1536)
+        if not text:
+            raise ValueError("Embedding Text cannot be empty")
+        return await to_thread(self.embedding_model.embed_single_text, text)
 
     async def summarize_with_title(self, past_summary: str, user_message: AgentMessage, agent_response: AgentMessage) -> AgentMessageSummary:
         message_exchange = "".join([user_message.get_formatted_prompt(), "\n", agent_response.get_formatted_prompt()])

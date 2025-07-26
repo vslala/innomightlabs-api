@@ -101,14 +101,14 @@ class AgenticWorkflow:
             yield state
             await asyncio.sleep(0.1)
 
-        state.thoughts = plan_content
+        state.thought = plan_content
 
     async def _execute_reasoning(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """Execute the reasoning process step by step."""
         reasoning_prompt = f"""
         Analysis: {state.analysis}
         
-        Plan: {state.thoughts}
+        Plan: {state.thought}
         
         Now execute this plan step by step to answer: "{state.user_message}"
         
@@ -156,7 +156,7 @@ class AgenticWorkflow:
         Based on the complete reasoning process:
         
         Analysis: {state.analysis}
-        Plan: {state.thoughts}
+        Plan: {state.thought}
         Reasoning: {state.reasoning}
         Insights: {state.synthesis}
         

@@ -1,7 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 from sqlalchemy.orm import Session
 
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
 from app.chatbot.chatbot_models import AgentState
 from app.chatbot.chatbot_services import ChatbotService
@@ -10,6 +10,7 @@ from app.chatbot.workflows.krishna_advance import KrishnaAdvanceWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
 from app.common.db_connect import SessionLocal
 from app.common.repositories import TransactionManager
+from app.common.vector_embedders import BaseVectorEmbedder, LangChainTitanEmbedder
 from app.common.workflows import BaseAgentWorkflow
 from app.conversation.messages.message_models import AgentVersion
 from app.conversation.messages.message_repositories import MessageRepository
@@ -35,9 +36,7 @@ class ServiceFactory:
     @staticmethod
     @lru_cache
     def get_conversation_service() -> ConversationService:
-        return ConversationService(
-            conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service()
-        )
+        return ConversationService(conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service())
 
     @staticmethod
     @lru_cache
@@ -49,7 +48,7 @@ class ServiceFactory:
     def get_chatbot_service() -> ChatbotService:
         return ChatbotService(
             chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
-            embedding_model=ChatbotFactory.get_embedding_model(),
+            embedding_model=ChatbotFactory.get_embedding_model(name="titan"),
         )
 
     @staticmethod
@@ -94,8 +93,13 @@ class ChatbotFactory:
         raise ValueError(f"Unknown chatbot: {owner} {model_name}")
 
     @staticmethod
-    def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
-        return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-exp-03-07")
+    def get_embedding_model(name: Literal["titan", "gemini"]) -> BaseVectorEmbedder:
+        # match name:
+        #     case "titan":
+        # return LangChainTitanEmbedder()
+        # case "gemini":
+        #     return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-exp-03-07")
+        return LangChainTitanEmbedder()
 
 
 class WorkflowFactory:
@@ -115,3 +119,12 @@ class WorkflowFactory:
     @classmethod
     def get_available_versions(cls) -> list[AgentVersion]:
         return list(cls._workflows.keys())
+
+
+class VectorEmbedderFactory:
+    @classmethod
+    def get_vector_embedder(cls, name: Literal["titan", "gemini"]):
+        if name == "titan":
+            return LangChainTitanEmbedder()
+        else:
+            raise ValueError(f"Unknown vector embedder: {name}")

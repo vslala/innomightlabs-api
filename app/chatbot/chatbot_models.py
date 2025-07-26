@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from enum import Enum
+from typing import Any, Generator
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,6 +68,11 @@ class AgentMessage(BaseModel):
         return f"[{role_cap}  - {ts_str}]  {self.message}"
 
 
+class Phase(Enum):
+    NEED_FINAL = "need_final"
+    NEED_TOOL = "need_tool"
+
+
 class AgentState(BaseModel):
     """State for the chat agent workflow."""
 
@@ -78,8 +84,9 @@ class AgentState(BaseModel):
     prompt: str = Field(default="")
 
     # Multi-step reasoning fields
+    phase: Phase = Field(default=Phase.NEED_FINAL)
     analysis: str = Field(default="")
-    thoughts: list[AgentThought] = Field(default=[])
+    thought: AgentThought | None = Field(default=None)
     observations: list[ActionResult] = Field(default=[])
 
     reasoning: str = Field(default="")
@@ -91,7 +98,9 @@ class AgentState(BaseModel):
     needs_refinement: bool = Field(default=True)
     refinement_count: int = Field(default=0)
 
+    # Error handling
     retry: int = Field(default=0)
+    error_message: str | None = Field(default=None)
 
     stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
 
@@ -104,13 +113,20 @@ class AgentState(BaseModel):
         if not self.observations:
             return ""
         n = len(self.observations)
-        observations = self.observations[:-limit] if n > 3 else self.observations
+        observations = self.observations[-limit:] if n > 3 else self.observations
         prompt = "\n# OBSERVATIONS\n\n"
-        prompt += "Below are the observations/result of your previous actions:"
+        prompt += "Below are the observations/result of your previous actions:\n"
         for idx, obs in enumerate(observations):
             prompt += f"## Observation {(idx + 1)}.\n"
             prompt += f"{obs}\n\n"
         return prompt
+
+    def get_error_message(self) -> Generator[str, None, None]:
+        if not self.error_message:
+            yield ""
+        else:
+            yield f"Got error: {self.error_message}"
+            self.error_message = None
 
 
 # Requests

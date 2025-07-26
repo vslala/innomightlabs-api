@@ -3,10 +3,10 @@ from typing import AsyncGenerator
 from loguru import logger
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import AgentState, StreamChunk
+from app.chatbot.chatbot_models import AgentState, Phase, StreamChunk
 from langgraph.graph import StateGraph, START, END
 
-from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper, route_condition
+from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper
 from app.common.workflows import BaseAgentWorkflow
 
 
@@ -23,20 +23,30 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
     async def run(self) -> AsyncGenerator[StreamChunk, None]:
         """
         Run the Krishna workflow and yield stream chunks.
-        This method implements the specific logic for Krishna's advanced tasks.
         """
         helper = KrishnaAdvanceWorkflowHelper(self.chatbot)
         graph = StateGraph(AgentState)
+
+        # 1) prompt_builder: ask LLM to think or finish
         graph.add_node("prompt_builder", helper.prompt_builder)
         graph.add_node("thinker", helper.thinker)
-        graph.add_node("response_validator", helper.validate_response)
+        graph.add_node("validate_response", helper.validate_response)
+        # 2) router: only if LLM asked for a tool
         graph.add_node("router", helper.router)
+        # 3) final_response: emit the answer
+        graph.add_node("final_response", helper.final_response)
 
+        # Start → prompt_builder
         graph.add_edge(START, "prompt_builder")
         graph.add_edge("prompt_builder", "thinker")
-        graph.add_edge("thinker", "response_validator")
-        graph.add_conditional_edges("response_validator", route_condition, {"final_response": END, "router": "router", "thinker": "thinker"}, END)
-        graph.add_conditional_edges("router", route_condition, {"final_response": END, "router": "prompt_builder", "thinker": "thinker"}, END)
+        graph.add_edge("thinker", "validate_response")
+        graph.add_conditional_edges("validate_response", lambda state: state.phase, {Phase.NEED_TOOL: "router", Phase.NEED_FINAL: "final_response"}, END)
+
+        # After running the tool, always go back into prompt_builder
+        graph.add_edge("router", "prompt_builder")
+
+        # final_response → END
+        graph.add_edge("final_response", END)
 
         app = graph.compile()
 
@@ -45,7 +55,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
             async def drive_workflow() -> None:
                 try:
                     state = self.state
-                    async for _ in app.astream(state):
+                    async for _ in app.astream(state, {"recursion_limit": 100}):
                         pass
                 finally:
                     await self.state.stream_queue.put(None)

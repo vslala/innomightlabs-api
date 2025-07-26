@@ -88,9 +88,8 @@ class MessageController(BaseController):
                         model_id=message.model_id,
                         parent_message_id=message.parent_message_id,
                     )
-                    conversation = await conversation_service.summarize(
-                        conversation_id=conversation_id, user=user, user_message=user_message, agent_response=agent_response
-                    )
+                    conversation = await conversation_service.summarize(conversation_id=conversation_id, user=user, user_message=user_message, agent_response=agent_response)
+                    logger.info(f"user_message={user_message}, agent_response={agent_response}")
                     user_message, agent_response = await message_service.add_messages(user=user, user_message=user_message, agent_response=agent_response)
                     if not user_message.id:
                         raise ValueError("Message Id should not be null!")

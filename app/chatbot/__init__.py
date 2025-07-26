@@ -48,6 +48,8 @@ class ClaudeSonnetChatbot(BaseChatbot):
 
         bedrock_kwargs = {
             "model": "anthropic.claude-3-sonnet-20240229-v1:0",
+            # "model": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+            # "model": "arn:aws:bedrock:us-east-1:873311188676:inference-profile/us.meta.llama3-2-1b-instruct-v1:0",
             "model_kwargs": {"temperature": temperature},
             "region": os.getenv("AWS_REGION", "us-east-1"),
         }

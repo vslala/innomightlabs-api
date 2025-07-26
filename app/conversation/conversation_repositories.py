@@ -34,18 +34,13 @@ class ConversationRepository(BaseRepository):
     def fetch_all_conversations_by_user(self, user: User) -> list[Conversation]:
         """Retreives all conversations from the database by user id"""
         conversations = self.session.query(ConversationEntity).filter_by(user_id=user.id).order_by(ConversationEntity.updated_at.desc()).all()
-        return [
-            Conversation(id=e.id, title=e.title, status=e.status, summary=e.summary or "", created_at=e.created_at, updated_at=e.updated_at)
-            for e in conversations
-        ]
+        return [Conversation(id=e.id, title=e.title, status=e.status, summary=e.summary or "", created_at=e.created_at, updated_at=e.updated_at) for e in conversations]
 
     def find_conversation_by_id(self, conversation_id: UUID) -> Conversation:
         entity = self.session.query(ConversationEntity).filter_by(id=conversation_id).first()
         if not entity:
             raise NotFoundException(f"Conversation with ID: {conversation_id} was not found!")
-        return Conversation(
-            id=entity.id, title=entity.title, status=entity.status, summary=entity.summary or "", created_at=entity.created_at, updated_at=entity.updated_at
-        )
+        return Conversation(id=entity.id, title=entity.title, status=entity.status, summary=entity.summary or "", created_at=entity.created_at, updated_at=entity.updated_at)
 
     def update_conversation(self, dto: ConversationRepositoryDTO) -> Conversation:
         print(f"[DTO]\n{dto}")

@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncGenerator
 import json
 from loguru import logger
@@ -6,7 +5,7 @@ import re
 
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, AgentState, AgentThought
+from app.chatbot.chatbot_models import Action, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.workflows.helpers.tools import (
     available_actions,
     tools,
@@ -31,9 +30,9 @@ def route_condition(state: AgentState) -> str:
     """
     Determine if the final response action is present in the thoughts.
     """
-    if len(state.thoughts) == 0:
+    if not state.thought:
         return "thinker"
-    elif any(thought.action.name == "final_response" for thought in state.thoughts):
+    elif state.thought.action.name == "final_response":
         return "final_response"
     return "router"
 
@@ -48,22 +47,20 @@ class KrishnaAdvanceWorkflowHelper:
         This method processes each action in the plan and executes it.
         """
         logger.info("\n\nExecuting Actions...\n\n")
-        tasks = []
-        for thought in state.thoughts:
-            selected_tool_name = thought.action.name
-            if selected_tool_name not in tools:
-                logger.error(f"Unknown tool: {selected_tool_name}")
-                raise ValueError(f"Unknown tool selected by the assistant: {selected_tool_name}")
+        if not state.thought:
+            raise ValueError("No thought provided")
 
-            selected_tool = tools[selected_tool_name]
-            tasks.append(asyncio.create_task(selected_tool(state=state)))
+        selected_tool_name = state.thought.action.name
+        if selected_tool_name not in tools:
+            logger.error(f"Unknown tool: {selected_tool_name}")
+            raise ValueError(f"Unknown tool selected by the assistant: {selected_tool_name}")
 
-        observations = await asyncio.gather(*tasks, return_exceptions=False)
-        observations = list(filter(bool, observations))
+        selected_tool = tools[selected_tool_name]
+        result = await selected_tool(state=state)
+        state.observations.append(result)
 
-        logger.info(f"Got the observations: {observations}")
-        state.observations.extend(observations)
-
+        logger.info(f"Got the observations: {result}")
+        state.thought = None
         yield state
 
     async def thinker(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
@@ -79,7 +76,7 @@ class KrishnaAdvanceWorkflowHelper:
 # SYSTEM INSTRUCTIONS
 
 You are a genius supercomputer called “Krishna” who performs tasks to answer user's query in the best possible way. You have access to tools which you can use to perform tasks.
-Provide response in JSON Format ONLY using following structure including the ```json ```:
+Provide response in proper JSON Format that can be parsed by pydantic only using following structure including the ```json ```:
 ```json
 {json.dumps(AgentThought.model_json_schema())}
 ```
@@ -90,7 +87,7 @@ Provide response in JSON Format ONLY using following structure including the ```
 {
             AgentThought(
                 thought="To solve this problem, I would need to implement a python code. Let's use `python_runner`",
-                action=Action(name="python_runner", params={"code_snippet": "print(54 * 100)"}),
+                action=Action(name="python_runner", params={"code_snippet": "<provide the code directly in text>"}),
             ).model_dump_json()
         }
 ```
@@ -109,9 +106,14 @@ IMPORTANT: ONLY RESPOND IN JSON USING ABOVE TOOLS
 Your job is to answer user's query in the best way possible. 
 
 Check for the answers in the result of your previous actions first.
+
 {state.build_observation()}
+
+{state.get_error_message()}
 """
         logger.info("Sending Initial Prompt...\n")
+        logger.info(f"Observations\n{state.build_observation()}")
+        state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
         state.prompt = prompt
         return state
 
@@ -120,15 +122,28 @@ Check for the answers in the result of your previous actions first.
         plan_of_action = state.draft_response
         try:
             parsed_json = extract_json_block(plan_of_action.strip())
-            thought = AgentThought.model_validate_json(parsed_json)
+            loaded_obj = json.loads(parsed_json, strict=False)
+            thought = AgentThought.model_validate(loaded_obj)
             logger.info(f"Plan of action\n{thought.model_dump_json()}")
-            state.thoughts = [thought]
+            state.thought = thought
+            state.phase = Phase.NEED_FINAL if thought.action.name == "final_response" else Phase.NEED_TOOL
         except json.JSONDecodeError as e:
+            state.phase = Phase.NEED_FINAL
             state.retry += 1
-            state.prompt += f"\n Failed to parse the response: {e}. Stick to the format instructions"
+            state.error_message = f"\n Failed to parse your Thought: {e}"
             logger.error(f"Failed to parse plan JSON: {e}. Falling back to raw parse.")
             if state.retry == 2:
                 raise ValueError("Failed to parse the plan of action after multiple retries.")
             return state
 
         return state
+
+    async def final_response(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
+        """
+        Generate the final response based on the plan and user message.
+        """
+        final_response = state.thought.action.params.get("text", "") if state.thought else ""
+        await state.stream_queue.put(StreamChunk(content=final_response, step=StreamStep.FINAL_RESPONSE, step_title="Finalizing Response"))
+
+        state.draft_response = final_response
+        yield state

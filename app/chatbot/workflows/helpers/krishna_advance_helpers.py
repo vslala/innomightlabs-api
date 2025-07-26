@@ -105,7 +105,8 @@ Provide response in proper JSON Format that can be parsed by pydantic only using
 IMPORTANT: ONLY RESPOND IN JSON USING ABOVE TOOLS
 Your job is to answer user's query in the best way possible. 
 
-Check for the answers in the result of your previous actions first.
+Check for the answers in the result of your previous actions first. 
+Make use of temp memory tools whenever necessary to effectively manage your workflow.
 
 {state.build_observation()}
 
@@ -127,7 +128,8 @@ Check for the answers in the result of your previous actions first.
             logger.info(f"Plan of action\n{thought.model_dump_json()}")
             state.thought = thought
             state.phase = Phase.NEED_FINAL if thought.action.name == "final_response" else Phase.NEED_TOOL
-        except json.JSONDecodeError as e:
+            state.retry = 0
+        except Exception as e:
             state.phase = Phase.NEED_FINAL
             state.retry += 1
             state.error_message = f"\n Failed to parse your Thought: {e}"
@@ -142,7 +144,7 @@ Check for the answers in the result of your previous actions first.
         """
         Generate the final response based on the plan and user message.
         """
-        final_response = state.thought.action.params.get("text", "") if state.thought else ""
+        final_response = state.thought.action.params.get("text", "") if state.thought else "Error generating response at the moment."
         await state.stream_queue.put(StreamChunk(content=final_response, step=StreamStep.FINAL_RESPONSE, step_title="Finalizing Response"))
 
         state.draft_response = final_response

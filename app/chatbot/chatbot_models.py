@@ -104,8 +104,9 @@ class AgentState(BaseModel):
 
     stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
 
-    def build_conversation_history(self, limit: int = 5) -> str:
+    def build_conversation_history(self, limit: int = 20) -> str:
         """Build the conversation history from the state."""
+        self.messages.sort(key=lambda msg: msg.timestamp)
         return "\n".join(msg.get_formatted_prompt() for msg in self.messages[-limit:])
 
     def build_observation(self, limit: int = 5) -> str:

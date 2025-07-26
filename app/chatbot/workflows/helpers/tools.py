@@ -15,10 +15,14 @@ from contextlib import redirect_stdout
 _shared_ns: dict = {}
 
 available_actions = [
-    Action(name="list_tools", description="Lists more tools from the registry.", params={}),
-    Action(name="intermediate_response", description="Sends the intermediate response to the user from the params.", params={"text": "string"}),
-    Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
+    Action(name="list_tools", description="Lists more tools from the registry like fetch_webpage, write_data_to_temp_memory etc.", params={}),
     Action(name="python_runner", description="Run a Python code snippet.", params={"code_snippet": "string"}),
+    Action(
+        name="intermediate_response",
+        description="If the response you are sending is too large you could use this tool to send it in multiple go. Sends the intermediate response to the user.",
+        params={"text": "string"},
+    ),
+    Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
     Action(name="wikipedia_search", description="Search Wikipedia and return a short summary.", params={"query": "string"}),
     Action(
         name="fetch_webpage",
@@ -27,8 +31,13 @@ available_actions = [
     ),
     Action(
         name="write_data_to_temp_memory",
-        description="writes the data to a temp file in the system temp and saves the path in the observations for later use",
-        params={"data": "string"},
+        description="""
+        Writes the data to a temp file for later use
+            data: actual data to write
+            filename_prefix (optional): use it to understand what the file content is about
+            filepath (optional): if the filepath is provided then it appends to the same file
+        """,
+        params={"data": "string", "filename_prefix?": "string", "filepath?": "string"},
     ),
 ]
 
@@ -37,23 +46,7 @@ async def list_tools_tool(state: AgentState) -> ActionResult:
     if not state.thought or (state.thought and state.thought.action.name != "python_runner"):
         return ActionResult(thought="", action="None", result="")
 
-    tools = [
-        Action(name="list_tools", description="Lists more tools from the registry.", params={}),
-        Action(name="intermediate_response", description="Sends the intermediate response to the user from the params.", params={"text": "string"}),
-        Action(name="final_response", description="Sends the final response to the user from the params.", params={"text": "string"}),
-        Action(name="python_runner", description="Run a Python code snippet.", params={"code_snippet": "string"}),
-        Action(name="wikipedia_search", description="Search Wikipedia and return a short summary.", params={"query": "string"}),
-        Action(
-            name="fetch_webpage",
-            description="Fetches the webpage and saves it in local temporary memory and adds the path of the file to observations for later processing at will using python code",
-            params={"url": "string"},
-        ),
-        Action(
-            name="write_data_to_temp_memory",
-            description="writes the data to a temp file in the system temp and saves the path in the observations for later use",
-            params={"data": "string"},
-        ),
-    ]
+    tools = available_actions[3:]
 
     return ActionResult(thought=state.thought.thought, action="list_tools", result=json.dumps([str(tool) for tool in tools], indent=2))
 
@@ -61,20 +54,34 @@ async def list_tools_tool(state: AgentState) -> ActionResult:
 async def write_data_to_temp_memory(state: AgentState) -> ActionResult:
     """
     Tool: writes the data to a temp file in the system temp directory so it can be retrieved later
+    Params: {
+        data: str,
+        filename_prefix?: str,
+        filepath?: str # full path to append to (optional)
+    }
     Returns the path of the file as observation
     """
     if not state.thought or (state.thought and state.thought.action.name != "write_data_to_temp_memory"):
         return ActionResult(thought="", action="None", result="")
 
-    state.stream_queue.put_nowait(StreamChunk(content=f"{state.thought.thought}", step=StreamStep.ANALYSIS, step_title="Writing to temp memory"))
-    data = state.thought.action.params["data"]
-    # 1) Create a temp file in the system temp directory
-    #    delete=False so it sticks around after closing
-    fd, path = tempfile.mkstemp(suffix=".txt", prefix="data_", dir=None)
-    os.close(fd)
+    state.stream_queue.put_nowait(StreamChunk(content=state.thought.thought, step=StreamStep.ANALYSIS, step_title="Writing to temp memory"))
 
-    # 2) Write the data
-    with open(path, "w", encoding="utf-8") as f:
+    data = state.thought.action.params["data"]
+    target = state.thought.action.params.get("filepath")
+
+    if target:
+        # append to (or create) the specified file
+        path = target
+        mode = "a"
+    else:
+        # make a brand‑new temp file
+        prefix = state.thought.action.params.get("filename_prefix", "data_")
+        fd, path = tempfile.mkstemp(suffix=".txt", prefix=prefix)
+        os.close(fd)
+        mode = "w"
+
+    # write or append
+    with open(path, mode, encoding="utf-8") as f:
         f.write(data)
 
     return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"filepath": path}))
@@ -140,8 +147,8 @@ async def python_code_runner_tool(state: AgentState) -> ActionResult:
     result = None
     try:
         # Offload to a thread so we don’t block the loop
-        out, result_vars = await asyncio.to_thread(_run)
-        # 3) Merge captured stdout into your result payload
+        task = asyncio.to_thread(_run)
+        out, result_vars = await asyncio.wait_for(task, timeout=30)
         payload = {"stdout": out}
         result = ActionResult(thought=latest_thought.thought, action="python_runner", result=str(payload))
     except Exception as e:
@@ -204,7 +211,7 @@ async def intermediate_response_tool(state: AgentState) -> ActionResult:
         return ActionResult(thought="", action="None", result="")
 
     response = state.thought.action.params.get("text", "")
-    await state.stream_queue.put(StreamChunk(content=response, step=StreamStep.REASONING, step_title="Thoughts"))
+    await state.stream_queue.put(StreamChunk(content=response, step=StreamStep.FINAL_RESPONSE, step_title="Thoughts"))
 
     return ActionResult(thought=state.thought.thought, action="intermediate_response", result=response)
 

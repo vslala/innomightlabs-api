@@ -54,3 +54,6 @@ class ConversationRepository(BaseRepository):
 
         self.session.commit()
         return Conversation(**dto.model_dump())
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        self.session.query(ConversationEntity).filter_by(id=conversation_id).delete()

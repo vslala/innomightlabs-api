@@ -40,7 +40,7 @@ class MessageRepository(BaseRepository):
         stmt = (
             select(MessageEntity)
             .where(MessageEntity.conversation_id == conversation_id)
-            .order_by(MessageEntity.message_embedding.l2_distance(embedding), MessageEntity.updated_at)
+            .order_by(MessageEntity.message_embedding.l2_distance(embedding), MessageEntity.updated_at.desc())
             .limit(top_k)
         )
 

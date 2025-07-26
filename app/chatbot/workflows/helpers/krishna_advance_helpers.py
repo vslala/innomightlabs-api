@@ -81,13 +81,23 @@ Provide response in proper JSON Format that can be parsed by pydantic only using
 {json.dumps(AgentThought.model_json_schema())}
 ```
 
-# EXAMPLE OUTPUT
+# EXAMPLE OUTPUT 1
 
 ```json
 {
             AgentThought(
                 thought="To solve this problem, I would need to implement a python code. Let's use `python_runner`",
                 action=Action(name="python_runner", params={"code_snippet": "<provide the code directly in text>"}),
+            ).model_dump_json()
+        }
+```
+# EXAMPLE OUTPUT 2
+
+```json
+{
+            AgentThought(
+                thought="I have found all the information I need. Let's send the final response to the user",
+                action=Action(name="final_response", params={"text": "<send the response back to the user solving their query>"}),
             ).model_dump_json()
         }
 ```
@@ -103,10 +113,9 @@ Provide response in proper JSON Format that can be parsed by pydantic only using
 "{state.user_message}"
 
 IMPORTANT: ONLY RESPOND IN JSON USING ABOVE TOOLS
-Your job is to answer user's query in the best way possible. 
-
-Check for the answers in the result of your previous actions first. 
-Make use of temp memory tools whenever necessary to effectively manage your workflow.
+Your job is to answer user's query in the best way possible. Use the provided tools cleverly to produce an excellent response.
+Whenever you have to work with large text or data, make use of the temporary memory to write and retrieve data.
+Make use of temp memory tools whenever necessary to limit the token usage.
 
 {state.build_observation()}
 
@@ -132,7 +141,7 @@ Make use of temp memory tools whenever necessary to effectively manage your work
         except Exception as e:
             state.phase = Phase.NEED_FINAL
             state.retry += 1
-            state.error_message = f"\n Failed to parse your Thought: {e}"
+            state.error_message = f"\n Failed to parse your Thought: {e}; Try using temp memory to form your response if its getting long."
             logger.error(f"Failed to parse plan JSON: {e}. Falling back to raw parse.")
             if state.retry == 2:
                 raise ValueError("Failed to parse the plan of action after multiple retries.")
@@ -144,7 +153,10 @@ Make use of temp memory tools whenever necessary to effectively manage your work
         """
         Generate the final response based on the plan and user message.
         """
-        final_response = state.thought.action.params.get("text", "") if state.thought else "Error generating response at the moment."
+        if not state.thought or not state.thought.action.params.get("text", ""):
+            raise ValueError("No thought provided for final_response")
+
+        final_response = state.thought.action.params.get("text", "")
         await state.stream_queue.put(StreamChunk(content=final_response, step=StreamStep.FINAL_RESPONSE, step_title="Finalizing Response"))
 
         state.draft_response = final_response

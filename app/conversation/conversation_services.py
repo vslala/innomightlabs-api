@@ -45,3 +45,6 @@ class ConversationService:
         self.repository.update_conversation(ConversationRepositoryDTO(**conversation_dto))
 
         return conversation
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        await self.repository.delete_conversation(conversation_id)

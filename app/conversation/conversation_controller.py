@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request
 
 from app.common.config import ServiceFactory
@@ -51,5 +52,16 @@ class ConversationController(BaseController):
             user = request.state.user
             all_conversations = await conversation_service.get_all_conversations(user=user)
             return [ConversationResponse.from_conversation(conversation=conversation) for conversation in all_conversations]
+
+        @self.api_router.delete(
+            "/{conversation_id}",
+            responses={204: {"description": "Conversation deleted successfully"}},
+            status_code=204,
+        )
+        async def delete_conversation(
+            conversation_id: UUID,
+            conversation_service: ConversationService = Depends(ServiceFactory.get_conversation_service),
+        ) -> None:
+            await conversation_service.delete_conversation(conversation_id=conversation_id)
 
         return self.api_router

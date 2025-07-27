@@ -5,7 +5,7 @@ import re
 
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, AgentState, AgentThought, Phase, StreamChunk, StreamStep
+from app.chatbot.chatbot_models import Action, ActionResult, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.workflows.helpers.tools import (
     available_actions,
     tools,
@@ -72,16 +72,44 @@ class KrishnaAdvanceWorkflowHelper:
         yield state
 
     def prompt_builder(self, state: AgentState) -> AgentState:
-        prompt = f"""
-# SYSTEM INSTRUCTIONS
+        system_prompt = f"""
+# SYSTEM 
+You are a genius assistant called “Krishna” who performs tasks to answer user's query in the best possible way. 
+You have two types of memory:
+- Local Memory: this contains recent conversation with the user. Recent results of the actions you performed. You can access it directly in your conversation context. 
+The most recent conversation messages and action results are already included in your context window, so you don't need to search for them.
+- Disk Memory: This contains multiple things:
+    - Entire conversation history with the user: This contains {len(state.messages)} user messages and {len(state.messages)} assistant 
+    responses
+    - Action Results: This contains results from all the actions that you have performed in the current session. The available action list will be provided below.
+    - Intermediate results: This will contain all the temporary files and data that will be created in the current session such as result of fetching a webpage, or
+    storing intermediate results in the files while processing large dataset.
 
-You are a genius supercomputer called “Krishna” who performs tasks to answer user's query in the best possible way. You have access to tools which you can use to perform tasks.
-Provide response in proper JSON Format that can be parsed by pydantic only using following structure including the ```json ```:
+## HOW DOES MEMORY WORKS
+- When you perform an action, the results are added to your "Local-Memory" section under OBSERVATIONS.
+- New action results are appended at the end of your Local-Memory (Older at the top, newest at the bottom)
+- This local-memory persists across conversation turns until replaced by newer results
+- Memory is managed on a FIFO basis (First In - First Out) - when new memory results exceeds the token limits, the oldest memories are removed first
+
+## HOW TO MANAGE MEMORY
+Suppose you are tasked with a bigger data. Loading the entire data in the memory won't be a good idea as it will not leave space for other useful stuff.
+In such scenarios make use of the disk-memory to write the data in a file and process in chunks... rather than loading all at once. You can use `python_runner` tool
+to execute the code to read the parts of the file. Let's say you load first 20 lines from the file, process it fetch the insights and write it to an output file and proceed
+to process other chunks in the same manner. At the end you will have the entire response ready in one file in disk thus saving your local memory to work with other things.
+
+One example could be, let's say, you have to combine knowledge across multiple different webpages or documents to provide response to the user. 
+And if this response is huge like writing an essay or producing insights, then it would make sense to append the response into some file in disk. 
+And use the `final_response` tool to send the response from the file directly.
+That way you will be able to process large datasets efficiently.
+
+## HOW TO PERFORM ACTIONS
+Memory search works by invoking actions in the system. You can invoke an action using json schema enclosed within ```json ``` block like this:
+
 ```json
 {json.dumps(AgentThought.model_json_schema())}
 ```
 
-# EXAMPLE OUTPUT 1
+### EXAMPLE 1
 
 ```json
 {
@@ -91,7 +119,7 @@ Provide response in proper JSON Format that can be parsed by pydantic only using
             ).model_dump_json()
         }
 ```
-# EXAMPLE OUTPUT 2
+### EXAMPLE 3
 
 ```json
 {
@@ -102,29 +130,31 @@ Provide response in proper JSON Format that can be parsed by pydantic only using
         }
 ```
 
-# AVAILABLE ACTIONS
+### EXAMPLE 3
+
+```json
+{
+            AgentThought(
+                thought="I have written all the information in disk-memory. Send it to the user.",
+                action=Action(name="final_response", params={"filepath": "<path of the file you wrote the response in>"}),
+            ).model_dump_json()
+        }
+```
+
+### AVAILABLE ACTIONS
 
 {json.dumps([action.model_dump_json() for action in available_actions])}
 
-# CONVERSATION HISTORY
-{state.build_conversation_history()}
-
-# CURRENT USER QUERY
-"{state.user_message}"
-
 IMPORTANT: ONLY RESPOND IN JSON USING ABOVE TOOLS
+IMPORTANT: YOU CAN ONLY PERFORM ONE ACTION AT A TIME
 Your job is to answer user's query in the best way possible. Use the provided tools cleverly to produce an excellent response.
-Whenever you have to work with large text or data, make use of the temporary memory to write and retrieve data.
-Make use of temp memory tools whenever necessary to limit the token usage.
-
-{state.build_observation()}
-
-{state.get_error_message()}
 """
+
+        state.add_system_prompt(system_prompt)
+
         logger.info("Sending Initial Prompt...\n")
-        logger.info(f"Observations\n{state.build_observation()}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
-        state.prompt = prompt
+        state.build_prompt()
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:
@@ -142,7 +172,10 @@ Make use of temp memory tools whenever necessary to limit the token usage.
             state.phase = Phase.NEED_FINAL
             state.retry += 1
             state.error_message = f"\n Failed to parse your Thought: {e}; Try using temp memory to form your response if its getting long."
-            logger.error(f"Failed to parse plan JSON: {e}. Falling back to raw parse.")
+            logger.error(f"Failed to parse plan JSON: {e}. Retry Count: {state.retry}")
+            state.observations.append(
+                ActionResult(thought="", action="response_validation", result=f"Cannot parse your thought as it was not in a proper JSON structure as instructed. Error: {e}")
+            )
             if state.retry == 2:
                 raise ValueError("Failed to parse the plan of action after multiple retries.")
             return state

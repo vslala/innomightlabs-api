@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
 from app.chatbot.chatbot_models import AgentState
 from app.chatbot.chatbot_services import ChatbotService
-from app.chatbot.workflows.krishna import KrishnaWorkflow
 from app.chatbot.workflows.krishna_advance import KrishnaAdvanceWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
 from app.common.db_connect import SessionLocal
@@ -105,7 +104,6 @@ class ChatbotFactory:
 class WorkflowFactory:
     _workflows: dict[AgentVersion, type[BaseAgentWorkflow]] = {
         AgentVersion.KRISHNA_MINI: KrishnaMiniWorkflow,
-        AgentVersion.KRISHNA: KrishnaWorkflow,
         AgentVersion.KRISHNA_ADVANCE: KrishnaAdvanceWorkflow,
     }
 

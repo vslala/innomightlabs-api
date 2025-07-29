@@ -43,7 +43,6 @@ class ConversationRepository(BaseRepository):
         return Conversation(id=entity.id, title=entity.title, status=entity.status, summary=entity.summary or "", created_at=entity.created_at, updated_at=entity.updated_at)
 
     def update_conversation(self, dto: ConversationRepositoryDTO) -> Conversation:
-        print(f"[DTO]\n{dto}")
         entity = self.session.query(ConversationEntity).filter_by(id=dto.id).first()
         assert entity
         entity.id = dto.id

@@ -18,6 +18,7 @@ class ChatbotService:
     async def ask_async(self, request: AgentRequest) -> AsyncGenerator[AgentStreamResponse, None]:
         """Send a message to the chatbot and return the response."""
         state = AgentState(
+            user=request.user,
             messages=request.message_history,
             user_message=request.message,
         )

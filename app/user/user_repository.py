@@ -25,13 +25,13 @@ class UserRepository(BaseRepository):
             raise NotFoundException(f"User with username '{username}' not found.")
         return UserDomain.from_entity(user)
 
-    def create_user(self, user: UserDomain) -> UserDomain:
+    def create_user(self, username: str) -> UserDomain:
         """Create a new user."""
-        if self.session.query(UserEntity).filter(UserEntity.username == user.username).first():
-            raise ValueError(f"User with username {user.username} already exists.")
+        if self.session.query(UserEntity).filter(UserEntity.username == username).first():
+            raise ValueError(f"User with username {username} already exists.")
 
         new_user = UserEntity()
-        new_user.username = user.username
+        new_user.username = username
         self.session.add(new_user)
         self.commit()
         return UserDomain.from_entity(new_user)

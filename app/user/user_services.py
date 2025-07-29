@@ -15,5 +15,5 @@ class UserService:
         return self.user_repository.get_user_by_username(username)
 
     async def add_user(self, userRequest: UserCreateRequest) -> User:
-        user = self.user_repository.create_user(User(username=userRequest.username))
+        user = self.user_repository.create_user(username=userRequest.username)
         return user

@@ -1,78 +1,333 @@
 import asyncio
+from collections import deque
+from datetime import datetime, timezone
 import io
 import json
 import os
 import tempfile
+from uuid import UUID, uuid4
 import aiohttp
 from bs4 import BeautifulSoup
 from loguru import logger
+from pydantic import BaseModel, Field
 import wikipedia
 
-from app.chatbot.chatbot_models import Action, ActionResult, AgentState, StreamChunk
-from app.common.models import StreamStep
+from app.chatbot.chatbot_models import ActionResult, AgentMessage, AgentState, MemoryEntry, MemoryType, StreamChunk
+from app.common.models import Role, StreamStep
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
+from langchain.tools import tool, BaseTool
 
 _shared_ns: dict = {}
 
-available_actions = [
-    Action(name="list_tools", description="Lists more tools from the registry like fetch_webpage, write_data_to_temp_memory etc.", params={}),
-    Action(name="python_runner", description="Run a Python code snippet.", params={"code_snippet": "string"}),
-    Action(
-        name="intermediate_response",
-        description="If the response you are sending is too large you could use this tool to send it in multiple go. Sends the intermediate response to the user.",
-        params={"text": "string"},
-    ),
-    Action(
-        name="final_response",
-        description="""
-Sends the final response to the user in two ways:
-- text: If text is provided then the response is directly sent from the text
-- filepath: If filepath is provided (usually to send large response), then Krishna (you) can choose to write it in a disk-memory and then send the path to that file,
-    and the content of that file will be sent to the user
-""",
-        params={"text?": "string", "filepath?": "string"},
-    ),
-    Action(name="wikipedia_search", description="Search Wikipedia and return a short summary.", params={"query": "string"}),
-    Action(
-        name="fetch_webpage",
-        description="""
-Fetches the webpage and write the data in the disk memory and adds the file path to the observatio/result. 
-The file can be accessed by other tools or if you want to access parts of it you can use python code to do that.
-""",
-        params={"url": "string"},
-    ),
-    Action(
-        name="write_data_to_disk_memory",
-        description="""
-Writes the data to a file on disk for later use. It works in the following ways:
-data: actual data to write
-filename_prefix (optional): use it to understand what the file content is about
-    - You DO NOT need to provide filename_prefix if you are appending to the same file.
-filepath (optional):
-    - if filepath is provided then the content from `params.data` is appended to the same file.
-    - if filepath is not provided then a new file will be created everytime.
-""",
-        params={"data": "string", "filename_prefix?": "string", "filepath?": "string"},
-    ),
-    Action(
-        name="read_data_from_disk_memory",
-        description="""
-        Reads the data from a file on disk and adds it to local-memory action results
-            filepath: reads the data from the provided filepath
-        """,
-        params={"filepath": "string"},
-    ),
-]
+# MEMORY TOOLS - Initialize lazily to avoid circular imports
+_message_repository = None
+_memory_manager = None
+_embedder = None
 
 
-async def list_tools_tool(state: AgentState) -> ActionResult:
-    if not state.thought or (state.thought and state.thought.action.name != "python_runner"):
-        return ActionResult(thought="", action="None", result="")
+def get_memory_manager():
+    global _memory_manager
+    if _memory_manager is None:
+        from app.common.config import RepositoryFactory
 
-    tools = available_actions[3:]
+        _memory_manager = RepositoryFactory.get_memory_manager_repository()
+    return _memory_manager
 
-    return ActionResult(thought=state.thought.thought, action="list_tools", result=json.dumps([str(tool) for tool in tools], indent=2))
+
+def get_embedder():
+    global _embedder
+    if _embedder is None:
+        from app.common.config import ChatbotFactory
+
+        _embedder = ChatbotFactory.get_embedding_model("titan")
+    return _embedder
+
+
+def get_message_repository():
+    global _message_repository
+    if _message_repository is None:
+        from app.common.config import RepositoryFactory
+
+        _message_repository = RepositoryFactory.get_message_repository()
+    return _message_repository
+
+
+def _manage_memory_overflow(state: AgentState, memory_type_enum: MemoryType, new_entry_size: int) -> None:
+    """Check for memory overflow and evict entries to maintain 50% capacity"""
+    from app.common.models import MemoryManagementConfig
+
+    # Get the appropriate memory deque based on memory type
+    if memory_type_enum in [MemoryType.ARCHIVAL, MemoryType.SUMMARY, MemoryType.PROFILE, MemoryType.PERSONA]:
+        memory_deque = state.archival_memory
+    elif memory_type_enum == MemoryType.RECALL:
+        memory_deque = state.recall_memory
+    else:
+        return
+
+    # Calculate current usage in characters (similar to get_memory_overflow_alert)
+    current_chars = sum(len(entry.content) for entry in memory_deque)
+
+    # Convert to tokens and check against memory type's token limit
+    current_tokens = current_chars / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
+    new_entry_tokens = new_entry_size / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
+    total_tokens_after_add = current_tokens + new_entry_tokens
+
+    # Check if would exceed 100% capacity (vs 80% threshold used in alerts)
+    if total_tokens_after_add > memory_type_enum.token_limit:
+        target_tokens = memory_type_enum.token_limit * 0.5  # 50% capacity
+        target_chars = int(target_tokens * MemoryManagementConfig.AVERAGE_TOKEN_SIZE)
+        evicted_ids = []
+
+        # Evict from front (FIFO) until we reach target
+        while memory_deque and current_chars > target_chars:
+            evicted_entry = memory_deque.popleft()
+            current_chars -= len(evicted_entry.content)
+            evicted_ids.append(evicted_entry.id)
+
+        # Evict from persistent storage
+        if evicted_ids:
+            get_memory_manager().evict_memory_batch(ids=evicted_ids)
+            logger.info(f"Evicted {len(evicted_ids)} {memory_type_enum.value} memory entries to prevent overflow")
+
+
+class ArchivalMemorySearchParams(BaseModel):
+    thought: str
+    query: str
+
+
+@tool(
+    "archival_memory_search",
+    description="Retrieve information from your extensive archival memory into your core working memory.",
+    args_schema=ArchivalMemorySearchParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def archival_memory_search(state: AgentState, input: ArchivalMemorySearchParams) -> ActionResult:
+    embeddings = get_embedder().embed_single_text(input.query)
+    results = get_memory_manager().search(user_id=state.user.id, embeddings=embeddings)
+
+    # Check for overflow before adding results
+    if results:
+        new_content_size = sum(len(entry.content) for entry in results)
+        _manage_memory_overflow(state, MemoryType.ARCHIVAL, new_content_size)
+
+    state.archival_memory.extend(results)
+    state.messages.append(AgentMessage(message=f"Found {len(results)} results. Added to archival memory.", role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)))
+    return ActionResult(thought=input.thought, action="archival_memory_search", result=f"Found {len(results)} results. Added to archival memory.")
+
+
+class ArchivalMemoryInsertParams(BaseModel):
+    """Add new data to your archival memory, expanding your knowledge base."""
+
+    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
+    data: str
+    label: str
+    metadata: dict[str, str] = Field(default={})
+
+
+@tool(
+    "archival_memory_insert",
+    description="Add new data to your archival memory, expanding your knowledge base.",
+    args_schema=ArchivalMemoryInsertParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def archival_memory_insert(state: AgentState, input: ArchivalMemoryInsertParams) -> ActionResult:
+    memory_type = MemoryType(input.label.lower())
+
+    # Check for overflow before adding new entry
+    _manage_memory_overflow(state, memory_type, len(input.data))
+
+    entry = MemoryEntry(
+        id=uuid4(), user_id=state.user.id, memory_type=memory_type, content=input.data, embedding=get_embedder().embed_single_text(input.data), metadata=input.metadata
+    )
+
+    get_memory_manager().update_memory(entry)
+    state.archival_memory.append(entry)
+    return ActionResult(thought=input.reference, action="archival_memory_insert", result="Archival memory inserted successfully")
+
+
+class ArchivalMemoryUpdateParams(BaseModel):
+    """Updates existing archival memory, keeping your knowledge base up-to-date and accurate"""
+
+    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
+    label: str
+    memory_id: UUID
+    data: str
+    metadata: dict[str, str] = Field(default={})
+
+
+@tool(
+    "archival_memory_update",
+    description="Updates existing archival memory, keeping your knowledge base up-to-date and accurate",
+    args_schema=ArchivalMemoryUpdateParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def archival_memory_update(state: AgentState, input: ArchivalMemoryUpdateParams) -> ActionResult:
+    entry = MemoryEntry(
+        id=input.memory_id,
+        user_id=state.user.id,
+        memory_type=MemoryType(input.label.lower()),
+        created_at=datetime.now(timezone.utc),
+        content=input.data,
+        embedding=get_embedder().embed_single_text(input.data),
+        metadata=input.metadata,
+    )
+
+    get_memory_manager().update_memory(entry)
+    for idx, item in enumerate(state.archival_memory):
+        if item.id == entry.id:
+            # replace the old with the new
+            state.archival_memory[idx] = entry
+            break
+
+    state.messages.append(
+        AgentMessage(
+            message=f"Updated archival memory with ID {input.memory_id}.\nNew content: {input.data}\nMetadata: {json.dumps(input.metadata, indent=2)}",
+            role=Role.SYSTEM,
+            timestamp=datetime.now(timezone.utc),
+        )
+    )
+    return ActionResult(thought=input.reference, action="archival_memory_update", result="Archival memory updated successfully")
+
+
+class ArchivalMemoryEvictParams(BaseModel):
+    """Updates existing archival memory, keeping your knowledge base up-to-date and accurate"""
+
+    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
+    memory_ids: list[UUID]
+
+
+@tool(
+    "archival_memory_evict",
+    description="Removes list of memory by ID that is not required in order to free up space for later use",
+    args_schema=ArchivalMemoryEvictParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def archival_memory_evict(state: AgentState, input: ArchivalMemoryEvictParams) -> ActionResult:
+    get_memory_manager().evict_memory_batch(ids=input.memory_ids)
+    state.archival_memory = deque([entry for entry in state.archival_memory if entry.id in input.memory_ids])
+    state.messages.append(AgentMessage(message=f"Evicted archival memory with IDs: {input.memory_ids}.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
+    return ActionResult(thought=input.reference, action="archival_memory_evict", result="Archival memory evicted successfully")
+
+
+class SendMessageParams(BaseModel):
+    """Sends the message to the user"""
+
+    message: str
+
+
+@tool(
+    "send_message",
+    description="Sends the message to the user. Always provide markdown text so it can be rendered properly for the user.",
+    args_schema=SendMessageParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def send_message(state: AgentState, input: SendMessageParams) -> ActionResult:
+    state.stream_queue.put_nowait(StreamChunk(content=input.message, step=StreamStep.FINAL_RESPONSE, step_title="Sending message to user"))
+    return ActionResult(thought="", action="send_message", result="Message sent successfully!")
+
+
+class RecallMemoryParams(BaseModel):
+    """Recalls memory based on the provided query"""
+
+    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
+    query: str
+
+
+@tool(
+    "recall_memory",
+    description="Recalls memory based on the provided query and adds it to the Recall Memory block",
+    args_schema=RecallMemoryParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def recall_memory(state: AgentState, input: RecallMemoryParams) -> ActionResult:
+    """
+    Recalls memory based on the provided query and adds it to the Recall Memory block.
+    """
+    embeddings = get_embedder().embed_single_text(input.query)
+    results = await get_message_repository().search_all_by_user_id_and_embeddings(user_id=state.user.id, embeddings=embeddings, top_k=3)
+
+    if not results:
+        return ActionResult(thought=input.reference, action="recall_memory", result="No relevant memory found.")
+
+    # Add results to recall memory
+    entries = [
+        MemoryEntry(
+            id=message.id,
+            user_id=state.user.id,
+            memory_type=MemoryType.RECALL,
+            content=message.content,
+            is_active=True,
+            embedding=message.embedding if message.embedding else [],
+            created_at=message.created_at,
+        )
+        for message in results
+    ]
+
+    # Check for overflow before adding entries
+    if entries:
+        new_content_size = sum(len(entry.content) for entry in entries)
+        _manage_memory_overflow(state, MemoryType.RECALL, new_content_size)
+
+    get_memory_manager().update_memory_batch(entries)
+    state.recall_memory.extend(entries)
+    state.messages.append(AgentMessage(message=f"Found {len(entries)} relevant memories. Added to recall memory.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
+
+    return ActionResult(thought=input.reference, action="recall_memory", result=f"Found {len(entries)} relevant memories. Added to recall memory.")
+
+
+class PythonCodeRunnerParams(BaseModel):
+    """Runs python code and returns the output"""
+
+    thought: str
+    code: str
+
+
+@tool("python_code_runner", description="Executes the provide python code", args_schema=PythonCodeRunnerParams, infer_schema=False, return_direct=True)
+async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -> ActionResult:
+    """
+    Execute the provided Python code snippet.
+    :param action: The action containing the code snippet to run.
+    :return: The result of the executed code.
+    """
+
+    def _run():
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            exec(input.code, _shared_ns, _shared_ns)
+        return buf.getvalue(), _shared_ns
+
+    logger.info("\n\nExecuting python_runner...")
+
+    state.stream_queue.put_nowait(StreamChunk(content=input.thought, step=StreamStep.ANALYSIS, step_title="Running Python Code"))
+    logger.info(f"\n\nRunning code...\n{input.code}\n\n")
+    result = None
+    try:
+        # Offload to a thread so we don’t block the loop
+        task = asyncio.to_thread(_run)
+        out, result_vars = await asyncio.wait_for(task, timeout=30)
+        payload = {"stdout": out}
+        state.messages.append(
+            AgentMessage(message=f"""{input.thought}\n\n{input.code}\n\n{json.dumps(payload)}""", role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)),
+        )
+        result = ActionResult(thought=input.thought, action="python_runner", result=str(payload))
+    except Exception as e:
+        logger.error(f"Error executing code: {str(e)}")
+        result = ActionResult(thought=input.thought, action="python_runner", result=str(e))
+
+    logger.info(f"\nGot the result: {result}\n\n")
+    return result
+
+
+memory_actions: list[BaseTool] = [archival_memory_search, archival_memory_insert, archival_memory_update, archival_memory_evict, recall_memory]
+additional_actions: list[BaseTool] = [send_message, python_code_runner]
+available_actions = memory_actions + additional_actions
 
 
 async def read_data_from_disk_memory(state: AgentState) -> ActionResult:
@@ -124,38 +379,6 @@ async def write_data_to_disk_memory(state: AgentState) -> ActionResult:
 
     state.filepaths.append(path)
     return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"filepath": path}))
-
-
-# async def download_webpage_by_url(state: AgentState) -> ActionResult:
-#     """
-#     Tool: fetch the URL in state.thought.params["url"], scrape out the text,
-#     and saves it in the temp file
-#     Returns the path of the file as observation
-#     """
-#     if not state.thought or (state.thought and state.thought.action.name != "fetch_webpage"):
-#         return ActionResult(thought="", action="None", result="")
-
-#     state.stream_queue.put_nowait(StreamChunk(content=f"{state.thought.thought}", step=StreamStep.ANALYSIS, step_title="Fetching Webpage"))
-#     url = state.thought.action.params["url"]
-#     # 1) fetch HTML
-#     async with aiohttp.ClientSession() as sess:
-#         async with sess.get(url) as resp:
-#             await state.stream_queue.put(StreamChunk(content=f"Fetching {url}...", step=StreamStep.ANALYSIS, step_title="Fetching Webpage"))
-#             html = await resp.text()
-
-#     # 2) extract plain text
-#     soup = BeautifulSoup(html, "html.parser")
-#     text = soup.get_text(separator=" ", strip=True)
-
-#     # 2) Create a temp file in the system temp directory
-#     #    delete=False so it sticks around after closing
-#     fd, path = tempfile.mkstemp(suffix=".html", prefix="page_", dir=None)
-#     os.close(fd)
-
-#     # 3) Write the HTML
-#     with open(path, "w", encoding="utf-8") as f:
-#         f.write(text)
-#     return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"url": url, "filepath": path}))
 
 
 async def download_webpage_by_url(state: AgentState) -> ActionResult:
@@ -349,13 +572,22 @@ async def intermediate_response_tool(state: AgentState) -> ActionResult:
     return ActionResult(thought=state.thought.thought, action="intermediate_response", result=response)
 
 
+# Define tools dictionary after all functions are defined
 tools = {
+    "read_data_from_disk_memory": read_data_from_disk_memory,
+    "write_data_to_disk_memory": write_data_to_disk_memory,
+    "fetch_webpage": download_webpage_by_url,
     "python_runner": python_code_runner_tool,
     "wikipedia_search": wikipedia_search_tool,
-    "list_tools": list_tools_tool,
-    "intermediate_response": intermediate_response_tool,
     "final_response": final_response_tool,
-    "fetch_webpage": download_webpage_by_url,
-    "write_data_to_disk_memory": write_data_to_disk_memory,
-    "read_data_from_disk_memory": read_data_from_disk_memory,
+    "intermediate_response": intermediate_response_tool,
 }
+
+new_tools = {}
+for my_tool in memory_actions:
+    new_tools[my_tool.name] = my_tool
+for my_tool in additional_actions:
+    new_tools[my_tool.name] = my_tool
+# Add the async tools
+for name, func in tools.items():
+    new_tools[name] = func

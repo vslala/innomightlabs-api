@@ -63,6 +63,7 @@ class MessageController(BaseController):
                     agent_response = ""
                     async for chunk in chatbot_service.ask_async(
                         request=AgentRequest(
+                            user=user,
                             message_history=[AgentMessage(message=m.content, role=m.role, timestamp=m.updated_at) for m in similar_messages],
                             message=message.content,
                             version=message.agent,

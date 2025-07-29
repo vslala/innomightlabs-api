@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.common.models import Role
 
@@ -13,7 +13,7 @@ class Message(BaseModel):
     This class is the domain model for a message, containing the necessary fields
     """
 
-    id: Optional[UUID] = None
+    id: UUID = Field(default=uuid4())
     content: str
     embedding: Optional[list[float]] = None
     conversation_id: UUID

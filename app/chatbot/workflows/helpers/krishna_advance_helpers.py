@@ -5,25 +5,52 @@ import re
 
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, ActionResult, AgentState, AgentThought, Phase, StreamChunk, StreamStep
-from app.chatbot.workflows.helpers.tools import (
-    available_actions,
-    tools,
-)
+from app.chatbot.chatbot_models import Action, AgentMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
+from app.chatbot.workflows.prompts.system.base_prompt import BASE_PROMPT
+from app.chatbot.workflows.prompts.system.intuitive_knowledge import INTUITIVE_KNOWLEDGE
+from app.common.models import Role
 
 
+# Only match the FIRST JSON block to prevent infinite loops
 JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+INNER_MONOLOGUE_RE = re.compile(r"<inner_monologue>(.*?)</inner_monologue>", re.DOTALL)
+
+
+def write_to_file(filepath: str, content: str) -> None:
+    """
+    Write content to a file, creating directories if they don't exist.
+    """
+    import os
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "w") as f:
+        f.write(content)
+    logger.info(f"Content written to {filepath}")
 
 
 def extract_json_block(text: str) -> str:
     """
-    Extracts the first JSON array block wrapped in triple backticks.
+    Extracts ONLY the FIRST JSON block and logs if multiple blocks exist.
+    This aggressively prevents infinite loops.
     """
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        return match.group(1).strip()
-    else:
-        raise ValueError("Cannot parse the provided content")
+    matches = JSON_BLOCK_RE.findall(text)
+    if not matches:
+        raise ValueError("No JSON block found in the response.")
+
+    if len(matches) > 1:
+        logger.warning(f"INFINITE LOOP PREVENTION: Found {len(matches)} JSON blocks, using only the first one")
+
+    json_content = matches[0].strip()
+    return json_content
+
+
+def extract_tag_content(text: str, tag: str) -> list[str]:
+    """
+    Extracts all text contents inside provided tag.
+    """
+    esc = re.escape(tag)
+    pattern = rf"<{esc}>(.*?)</{esc}>"
+    return re.findall(pattern, text, flags=re.DOTALL)
 
 
 def route_condition(state: AgentState) -> str:
@@ -46,18 +73,40 @@ class KrishnaAdvanceWorkflowHelper:
         Execute the actions in the plan.
         This method processes each action in the plan and executes it.
         """
+        import app.chatbot.workflows.helpers.tools as Tools
+
         logger.info("\n\nExecuting Actions...\n\n")
         if not state.thought:
             raise ValueError("No thought provided")
 
         selected_tool_name = state.thought.action.name
-        if selected_tool_name not in tools:
+        if selected_tool_name not in Tools.new_tools:
             logger.error(f"Unknown tool: {selected_tool_name}")
             raise ValueError(f"Unknown tool selected by the assistant: {selected_tool_name}")
 
-        selected_tool = tools[selected_tool_name]
-        result = await selected_tool(state=state)
+        selected_tool = Tools.new_tools[selected_tool_name]
+
+        input_params = state.thought.action.params
+
+        # Handle LangChain tools vs custom async functions differently
+        if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
+            # LangChain tool - create proper input object with thought from state
+            tool_params = {"thought": state.thought.thought, **input_params}
+            tool_input = selected_tool.args_schema(**tool_params)
+            # LangChain tools expect state and input as separate arguments to the underlying function
+            result = await selected_tool.coroutine(state, tool_input)
+        else:
+            # Custom async function
+            result = await selected_tool(state)
+
         state.observations.append(result)
+        state.messages.append(
+            AgentMessage(
+                message=f"Executed action: {selected_tool_name} with params: {json.dumps(input_params, indent=2)} and result is:\n{result.result}",
+                role=Role.SYSTEM,
+                timestamp=result.timestamp,
+            )
+        )
 
         logger.info(f"Got the observations: {result}")
         state.thought = None
@@ -68,116 +117,95 @@ class KrishnaAdvanceWorkflowHelper:
         async for chunk in self.chatbot.stream_response(prompt=state.prompt):
             plan_of_action += str(chunk)
 
-        state.draft_response = plan_of_action
+        state.llm_response = plan_of_action
         yield state
 
     def prompt_builder(self, state: AgentState) -> AgentState:
-        system_prompt = f"""
-# SYSTEM 
-You are a genius assistant called “Krishna” who performs tasks to answer user's query in the best possible way. 
-You have two types of memory:
-- Local Memory: this contains recent conversation with the user. Recent results of the actions you performed. You can access it directly in your conversation context. 
-The most recent conversation messages and action results are already included in your context window, so you don't need to search for them.
-- Disk Memory: This contains multiple things:
-    - Entire conversation history with the user: This contains {len(state.messages)} user messages and {len(state.messages)} assistant 
-    responses
-    - Action Results: This contains results from all the actions that you have performed in the current session. The available action list will be provided below.
-    - Intermediate results: This will contain all the temporary files and data that will be created in the current session such as result of fetching a webpage, or
-    storing intermediate results in the files while processing large dataset.
+        """
+        Build the prompt for the LLM with circuit breaker
+        """
+        # Check for memory overflow alerts
+        memory_alert = state.get_memory_overflow_alert()
+        memory_alert_text = f"\n{memory_alert}\n" if memory_alert else ""
 
-## HOW DOES MEMORY WORKS
-- When you perform an action, the results are added to your "Local-Memory" section under OBSERVATIONS.
-- New action results are appended at the end of your Local-Memory (Older at the top, newest at the bottom)
-- This local-memory persists across conversation turns until replaced by newer results
-- Memory is managed on a FIFO basis (First In - First Out) - when new memory results exceeds the token limits, the oldest memories are removed first
+        prompt = f"""
+{BASE_PROMPT}
 
-## HOW TO MANAGE MEMORY
-Suppose you are tasked with a bigger data. Loading the entire data in the memory won't be a good idea as it will not leave space for other useful stuff.
-In such scenarios make use of the disk-memory to write the data in a file and process in chunks... rather than loading all at once. You can use `python_runner` tool
-to execute the code to read the parts of the file. Let's say you load first 20 lines from the file, process it fetch the insights and write it to an output file and proceed
-to process other chunks in the same manner. At the end you will have the entire response ready in one file in disk thus saving your local memory to work with other things.
+{INTUITIVE_KNOWLEDGE}
 
-One example could be, let's say, you have to combine knowledge across multiple different webpages or documents to provide response to the user. 
-And if this response is huge like writing an essay or producing insights, then it would make sense to append the response into some file in disk. 
-And use the `final_response` tool to send the response from the file directly.
-That way you will be able to process large datasets efficiently.
+{memory_alert_text}
 
-## HOW TO PERFORM ACTIONS
-Memory search works by invoking actions in the system. You can invoke an action using json schema enclosed within ```json ``` block like this:
+============ ARCHIVAL MEMORY BLOCKS ==================
+{state.build_archival_memory()}
+============ END OF ARCHIVAL MEMORY BLOCKS ===============
 
-```json
-{json.dumps(AgentThought.model_json_schema())}
-```
+============ RECALL MEMORY BLOCKS ===================
+{state.build_recall_memory()}
+============ END OF RECALL MEMORY BLOCKS ================
 
-### EXAMPLE 1
+============ CONVERSATION HISTORY ==================
+{state.build_conversation_history()}
+============ END OF CONVERSATION HISTORY ===============
 
-```json
-{
-            AgentThought(
-                thought="To solve this problem, I would need to implement a python code. Let's use `python_runner`",
-                action=Action(name="python_runner", params={"code_snippet": "<provide the code directly in text>"}),
-            ).model_dump_json()
-        }
-```
-### EXAMPLE 3
 
-```json
-{
-            AgentThought(
-                thought="I have found all the information I need. Let's send the final response to the user",
-                action=Action(name="final_response", params={"text": "<send the response back to the user solving their query>"}),
-            ).model_dump_json()
-        }
-```
+{state.build_observations()}
 
-### EXAMPLE 3
-
-```json
-{
-            AgentThought(
-                thought="I have written all the information in disk-memory. Send it to the user.",
-                action=Action(name="final_response", params={"filepath": "<path of the file you wrote the response in>"}),
-            ).model_dump_json()
-        }
-```
-
-### AVAILABLE ACTIONS
-
-{json.dumps([action.model_dump_json() for action in available_actions])}
-
-IMPORTANT: ONLY RESPOND IN JSON USING ABOVE TOOLS
-IMPORTANT: YOU CAN ONLY PERFORM ONE ACTION AT A TIME
-Your job is to answer user's query in the best way possible. Use the provided tools cleverly to produce an excellent response.
+User Current Query:
+[user] - {state.user_message}
 """
-
-        state.add_system_prompt(system_prompt)
-
-        logger.info("Sending Initial Prompt...\n")
+        state.prompt = state.build_prompt(prompt=prompt)
+        logger.info(f"Prompt built for epoch {state.epochs}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
-        state.build_prompt()
+        write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:
-        logger.info(f"Validating Response\n\n{state.draft_response}")
-        plan_of_action = state.draft_response
+        logger.info(f"Validating Response\n\n{state.llm_response}...")
+        plan_of_action = state.llm_response
         try:
-            parsed_json = extract_json_block(plan_of_action.strip())
-            loaded_obj = json.loads(parsed_json, strict=False)
-            thought = AgentThought.model_validate(loaded_obj)
-            logger.info(f"Plan of action\n{thought.model_dump_json()}")
-            state.thought = thought
-            state.phase = Phase.NEED_FINAL if thought.action.name == "final_response" else Phase.NEED_TOOL
-            state.retry = 0
+            thoughts = ""
+            monologues = extract_tag_content(plan_of_action, "inner_monologue")
+            if monologues:
+                for i, monologue in enumerate(monologues):
+                    thoughts += monologue.strip() + "\n"
+                    state.stream_queue.put_nowait(StreamChunk(content=monologue, step=StreamStep.PLANNING, step_title="Reflecting..."))
+                    state.messages.append(
+                        AgentMessage(
+                            message=f"Inner monologue {i + 1}: {monologue.strip()}",
+                            role=Role.ASSISTANT,
+                        )
+                    )
+
+            action_json = extract_tag_content(plan_of_action, "action")
+            if action_json:
+                action_dict = json.loads(action_json[0], strict=False)
+                agent_action = Action.model_validate(action_dict)
+                state.thought = AgentThought(thought=thoughts, action=agent_action)
+                state.phase = Phase.NEED_FINAL if agent_action.name == "send_message" else Phase.NEED_TOOL
+                state.retry = 0
+                write_to_file(f"/tmp/prompts/response_{state.epochs}.md", plan_of_action)
+            else:
+                state.phase = Phase.NEED_TOOL
         except Exception as e:
-            state.phase = Phase.NEED_FINAL
             state.retry += 1
-            state.error_message = f"\n Failed to parse your Thought: {e}; Try using temp memory to form your response if its getting long."
-            logger.error(f"Failed to parse plan JSON: {e}. Retry Count: {state.retry}")
-            state.observations.append(
-                ActionResult(thought="", action="response_validation", result=f"Cannot parse your thought as it was not in a proper JSON structure as instructed. Error: {e}")
-            )
-            if state.retry == 2:
-                raise ValueError("Failed to parse the plan of action after multiple retries.")
+            logger.error(f"Validation failed: {e}. Retry: {state.retry}")
+
+            if state.retry >= 2:
+                # Force final response after 2 retries
+                logger.warning("Forcing final response after multiple validation failures")
+                state.thought = AgentThought(
+                    thought="Validation failed multiple times, providing fallback response",
+                    action=Action(
+                        name="send_message",
+                        description="Sends the message to the user",
+                        params={"message": "I apologize, but I'm having trouble processing your request. Please try rephrasing your question."},
+                    ),
+                )
+                state.phase = Phase.NEED_FINAL
+            else:
+                state.thought = None
+                state.phase = Phase.NEED_TOOL
+
             return state
 
         return state
@@ -186,11 +214,48 @@ Your job is to answer user's query in the best way possible. Use the provided to
         """
         Generate the final response based on the plan and user message.
         """
-        if not state.thought or not state.thought.action.params.get("text", ""):
+        if not state.thought:
             raise ValueError("No thought provided for final_response")
 
-        final_response = state.thought.action.params.get("text", "")
+        # Handle send_message action
+        if state.thought.action.name == "send_message":
+            final_response = state.thought.action.params.get("message", "")
+        else:
+            final_response = state.thought.action.params.get("text", "")
+
+        if not final_response:
+            raise ValueError(f"No message content found in {state.thought.action.name} action params")
+
         await state.stream_queue.put(StreamChunk(content=final_response, step=StreamStep.FINAL_RESPONSE, step_title="Finalizing Response"))
 
-        state.draft_response = final_response
+        state.llm_response = final_response
         yield state
+
+    def _is_duplicate_action(self, state: AgentState, thought: AgentThought) -> bool:
+        """Check if this action was already performed successfully"""
+        if not state.observations:
+            return False
+
+        # Check last few observations for successful python_code_runner
+        for obs in state.observations[-3:]:
+            if obs.action == "python_runner" and thought.action.name == "python_code_runner" and "stdout" in obs.result:
+                return True
+        return False
+
+    def _generate_final_response_from_observations(self, state: AgentState) -> str:
+        """Generate final response based on observations"""
+        if not state.observations:
+            return "I couldn't complete the task."
+
+        # Find the last successful python execution
+        for obs in reversed(state.observations):
+            if obs.action == "python_runner" and "stdout" in obs.result:
+                try:
+                    result_dict = eval(obs.result)
+                    output = result_dict.get("stdout", "").strip()
+                    if output:
+                        return f"Here's the solution:\n\n{output}"
+                except Exception:
+                    pass
+
+        return "I have processed your request but couldn't generate a clear output."

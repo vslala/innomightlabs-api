@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Self
+from typing import Self
 from uuid import UUID
 from pydantic import BaseModel
 
@@ -9,7 +9,7 @@ from app.user.user_entities import UserEntity
 class User(BaseModel):
     """Represents a user in the system."""
 
-    id: Optional[UUID] = None
+    id: UUID
     username: str
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import shutil
 from typing import AsyncGenerator
 from loguru import logger
 
@@ -24,6 +26,9 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         """
         Run the Krishna workflow and yield stream chunks.
         """
+        shutil.rmtree("/tmp/prompts", ignore_errors=True)
+        os.makedirs("/tmp/prompts", exist_ok=True)
+
         helper = KrishnaAdvanceWorkflowHelper(self.chatbot)
         graph = StateGraph(AgentState)
 
@@ -40,7 +45,17 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         graph.add_edge(START, "prompt_builder")
         graph.add_edge("prompt_builder", "thinker")
         graph.add_edge("thinker", "validate_response")
-        graph.add_conditional_edges("validate_response", lambda state: state.phase, {Phase.NEED_TOOL: "router", Phase.NEED_FINAL: "final_response"}, END)
+
+        def route_after_validation(state: AgentState) -> str:
+            if state.phase == Phase.NEED_FINAL:
+                return "final_response"
+            elif state.phase == Phase.NEED_TOOL and state.thought:
+                return "router"
+            else:
+                # Retry thinking if no thought but need tool
+                return "thinker"
+
+        graph.add_conditional_edges("validate_response", route_after_validation, {"router": "router", "final_response": "final_response", "thinker": "thinker"}, END)
 
         # After running the tool, always go back into prompt_builder
         graph.add_edge("router", "prompt_builder")

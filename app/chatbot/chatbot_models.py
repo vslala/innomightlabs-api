@@ -102,7 +102,7 @@ class AgentMessage(BaseModel):
     timestamp: datetime = Field(default=datetime.now(timezone.utc))
 
     def get_formatted_prompt(self) -> str:
-        ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M")
+        ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         role_cap = self.role.value.capitalize()
         return f"[{role_cap} - ({ts_str})] {self.message}"
 
@@ -168,13 +168,11 @@ class AgentState(BaseModel):
             recall_memory += entry.serialize()
         return recall_memory
 
-    def build_conversation_history(self, curr_page: int = 1) -> str:
+    def build_conversation_history(self) -> str:
         """Build the conversation history from the state."""
         page_size = MemoryManagementConfig.CONVERSATION_PAGE_SIZE
-        message_start = (page_size * curr_page) - page_size
-        message_end = message_start + page_size + 1
 
-        curr_messages = self.messages[message_start:message_end]
+        curr_messages = self.messages[-page_size:]
         curr_messages.sort(key=lambda msg: msg.timestamp)
 
         messages = "\n".join(msg.get_formatted_prompt() for msg in curr_messages)

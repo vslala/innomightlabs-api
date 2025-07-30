@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Literal
 from sqlalchemy.orm import Session
 
@@ -34,17 +33,14 @@ class SessionFactory:
 
 class ServiceFactory:
     @staticmethod
-    @lru_cache
     def get_conversation_service() -> ConversationService:
         return ConversationService(conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service())
 
     @staticmethod
-    @lru_cache
     def get_user_service() -> UserService:
         return UserService(RepositoryFactory.get_user_repository())
 
     @staticmethod
-    @lru_cache
     def get_chatbot_service() -> ChatbotService:
         return ChatbotService(
             chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
@@ -52,7 +48,6 @@ class ServiceFactory:
         )
 
     @staticmethod
-    @lru_cache
     def get_message_service() -> MessageService:
         return MessageService(
             RepositoryFactory.get_transaction_manager(),
@@ -63,27 +58,22 @@ class ServiceFactory:
 
 class RepositoryFactory:
     @staticmethod
-    @lru_cache
     def get_transaction_manager() -> TransactionManager:
         return TransactionManager(session=SessionFactory.get_session())
 
     @staticmethod
-    @lru_cache
     def get_conversation_repository() -> ConversationRepository:
         return ConversationRepository(session=SessionFactory.get_session())
 
     @staticmethod
-    @lru_cache
     def get_user_repository() -> UserRepository:
         return UserRepository(session=SessionFactory.get_session())
 
     @staticmethod
-    @lru_cache
     def get_message_repository() -> MessageRepository:
         return MessageRepository(session=SessionFactory.get_session())
 
     @staticmethod
-    @lru_cache
     def get_memory_manager_repository() -> MemoryManager:
         return MemoryManager(session=SessionFactory.get_session())
 

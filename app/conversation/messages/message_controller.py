@@ -56,7 +56,7 @@ class MessageController(BaseController):
             """
             user: User = request.state.user
             logger.info(f"conversation_id: {conversation_id},\nuser: {user.model_dump_json},\nuser request: {message.model_dump_json()}")
-            similar_messages = await message_service.get_conversation_history(conversation_id=conversation_id, message_content=message.content)
+            conversation_messages = await message_service.get_all_messages(conversation_id=conversation_id)
 
             async def _handle_streaming_response():
                 try:
@@ -64,7 +64,7 @@ class MessageController(BaseController):
                     async for chunk in chatbot_service.ask_async(
                         request=AgentRequest(
                             user=user,
-                            message_history=[AgentMessage(message=m.content, role=m.role, timestamp=m.updated_at) for m in similar_messages],
+                            message_history=[AgentMessage(message=m.content, role=m.role, timestamp=m.updated_at) for m in conversation_messages],
                             message=message.content,
                             version=message.agent,
                         )

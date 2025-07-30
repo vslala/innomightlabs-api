@@ -157,6 +157,8 @@ User Current Query:
         logger.info(f"Prompt built for epoch {state.epochs}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
         write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
+        logger.debug(f"\n==== CONVERSATION HISTORY ====\n\n{state.build_conversation_history()}\n")
+        logger.debug(f"\n==== ARCHIVAL MEMORY ====\n{state.build_archival_memory()}\n")
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:
@@ -189,7 +191,7 @@ User Current Query:
         except Exception as e:
             state.retry += 1
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
-
+            state.messages.append(AgentMessage(message=f"Validation failed while parsing your json response: {e}", role=Role.SYSTEM))
             if state.retry >= 2:
                 # Force final response after 2 retries
                 logger.warning("Forcing final response after multiple validation failures")

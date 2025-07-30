@@ -6,7 +6,7 @@ from app.common.models import MemoryType
 
 
 def get_action_list(tools: list[BaseTool]):
-    return [{"name": tool.name, "description": tool.description, "parameters": tool.args} for tool in tools]
+    return [{"name": tool.name, "description": tool.description, "parameters": tool.args_schema.model_json_schema()} for tool in tools]
 
 
 def get_label_instructions() -> str:
@@ -48,7 +48,7 @@ INTUITIVE_KNOWLEDGE = f"""
 IMPORTANT: 
 - Provide EXACTLY ONE inner_monologue and ONE action per response
 - DO NOT provide multiple actions
-- If repeating actions without progress, use send_message instead
+- If repeating actions without progress, use `send_message` instead
 
 <inner_monologue>
 ...your private thought (≤50 words)...
@@ -65,8 +65,10 @@ IMPORTANT:
 STOP IMMEDIATELY after the closing </action> tag. You will be called again to continue.
 
 =============== EXAMPLES ===============
-### EXAMPLE 1
-Run Python Code
+### EXAMPLE 1: Run Python Code
+- Use this when you want to execute Python code and get the result.
+- Do not include markdown fences or commentary. 
+- All strings must be valid JSON literals: escape " as \\" and newlines as \\n.
 
 <inner_monologue>
 Writing code to solve the task.
@@ -76,12 +78,15 @@ Writing code to solve the task.
 {{
     "name": "python_code_runner",
     "description": "Executes the provided python code",
-    "params": {{ "code": "print('Hello, World!')" }}
+    "params": {{ "code": "..." }}
 }}
 </action>
 
-### EXAMPLE 2
-Final Reply to User
+### EXAMPLE 2: Final Reply to User.
+- Even if you have to send the code snippet as a final response, you will still use `send_message` action.
+- Use this when you want to SEND CODE and get the result.
+  - Do not include markdown fences or commentary. 
+  - All strings must be valid JSON literals: escape " as \\" and newlines as \\n.
 
 <inner_monologue>
 I have the answer; time to respond.
@@ -110,4 +115,5 @@ I've searched multiple times with no new results. Time to provide what I know an
 }}
 </action>
 =============== END OF EXAMPLES ===============
+IMPORTANT: If you think you have executed the same action previously, STOP and instead use `send_message` action to send the message to the user.
 """

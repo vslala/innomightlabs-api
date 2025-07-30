@@ -289,7 +289,7 @@ class PythonCodeRunnerParams(BaseModel):
     code: str
 
 
-@tool("python_code_runner", description="Executes the provide python code", args_schema=PythonCodeRunnerParams, infer_schema=False, return_direct=True)
+@tool("python_code_runner", description="Executes the provide python code", args_schema=PythonCodeRunnerParams, infer_schema=True, return_direct=True)
 async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -> ActionResult:
     """
     Execute the provided Python code snippet.

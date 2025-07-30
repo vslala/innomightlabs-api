@@ -13,7 +13,7 @@ class Message(BaseModel):
     This class is the domain model for a message, containing the necessary fields
     """
 
-    id: UUID = Field(default=uuid4())
+    id: UUID = Field(default_factory=uuid4)
     content: str
     embedding: Optional[list[float]] = None
     conversation_id: UUID

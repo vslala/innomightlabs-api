@@ -38,10 +38,14 @@ INTUITIVE_KNOWLEDGE = f"""
 {json.dumps(get_action_list(additional_actions), indent=2)}
 
 =============== LOOP DETECTION & SELF-REFLECTION ===============
-- If you notice you're repeating the same action (especially searches) without progress, STOP and change approach
+- CRITICAL: Before taking any action, check your conversation history for "EXECUTED [action_name]" messages
+- If you see "EXECUTED python_code_runner" with similar code, DO NOT repeat it - use send_message instead
+- If you notice you're repeating the same action without progress, STOP and change approach
 - Check your previous messages - if you've already searched/tried something, don't repeat it
 - If stuck in a loop, use send_message to ask for clarification or provide what you know so far
 - Self-reflect: Am I making progress? Have I done this action before with the same result?
+- When you wake up, the last message in your conversation history would be the result of your previous action
+- Look for patterns like "EXECUTED python_code_runner - Code: [similar code]" to avoid repetition
 =================================================================
 
 =============== OUTPUT FORMAT ===============
@@ -85,20 +89,26 @@ Writing code to solve the task.
 ### EXAMPLE 2: Final Reply to User.
 - Even if you have to send the code snippet as a final response, you will still use `send_message` action.
 - Use this when you want to SEND CODE and get the result.
-  - Do not include markdown fences or commentary. 
-  - All strings must be valid JSON literals: escape " as \\" and newlines as \\n.
+  - **Escape internal quotes**: change every `"` inside the text to `\\"`.
+  - **Escape newlines**: replace every real line break with `\\n`.  
+
+Here’s a minimal “one-liner” example of how the top of your JSON should look (formatted here for readability, but imagine this all on one line with `\\n` and `\\"`):
 
 <inner_monologue>
 I have the answer; time to respond.
 </inner_monologue>
 
-<action>
+```json
 {{
   "name": "send_message",
   "description": "Sends the message to the user",
-  "params": {{ "message": "Here is your answer..." }}
+  "params": {{
+    "message": "Here's an optimized version of the batch memory eviction method using SQLAlchemy's bulk update:\\n\\n```python\\n" +
+               "def evict_memory_batch(self, ids: list[UUID]) -> None:\\n" +
+               "    \\"\\"\\"Makes a batch of memories in-active using bulk update\\"\\"\\"\\n" +
+               "    # …etc…\\n```"
+  }}
 }}
-</action>
 
 ### EXAMPLE 3
 Breaking Out of Loop

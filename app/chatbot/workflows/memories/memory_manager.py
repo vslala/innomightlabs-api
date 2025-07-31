@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from app.chatbot.chatbot_models import MemoryEntry, PaginatedMemoryResult
 from app.chatbot.workflows.memories.memory_entities import MemoryEntryEntity
 from app.common.models import MemoryManagementConfig
@@ -9,15 +9,20 @@ from app.common.repositories import BaseRepository
 
 class MemoryManager(BaseRepository):
     def search(self, user_id: UUID, embeddings: list[float], top_k: int = 3) -> list[MemoryEntry]:
-        stmt = (
+        sub_q = (
             select(MemoryEntryEntity)
             .where(MemoryEntryEntity.user_id == user_id)
             .order_by(MemoryEntryEntity.embedding.l2_distance(embeddings), MemoryEntryEntity.created_at.desc())
             .limit(top_k)
         )
 
-        entities = self.session.scalars(stmt).all()
-        return [entity.to_domain() for entity in entities]
+        stmt = update(MemoryEntryEntity).where(MemoryEntryEntity.id.in_(select(sub_q.c.id))).values(is_active=True).returning(MemoryEntryEntity)
+
+        result = self.session.execute(stmt)
+        # scalars() gives ORM‐mapped objects
+        entities = result.scalars().all()
+        self.session.commit()
+        return [ent.to_domain() for ent in entities]
 
     def update_memory(self, domain: MemoryEntry) -> None:
         """Upserts MemoryEntryEntity from a domain model"""
@@ -42,23 +47,26 @@ class MemoryManager(BaseRepository):
 
     def evict_memory_batch(self, ids: list[UUID]) -> None:
         """Makes a batch of memories in-active"""
-
-        entries = self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id.in_(ids)).all()
-        for entry in entries:
-            entry.is_active = False
+        self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id.in_(ids)).update({MemoryEntryEntity.is_active: False}, synchronize_session=False)
         self.commit()
 
     def read(self, user_id: UUID, limit: int = 100) -> list[MemoryEntry]:
         """Reads the top N latest entries"""
 
-        entries = (
-            self.session.query(MemoryEntryEntity)
-            .filter(MemoryEntryEntity.user_id == user_id, MemoryEntryEntity.is_active)
-            .order_by(MemoryEntryEntity.created_at.desc())
-            .limit(limit)
+        # 1) pick the IDs we want
+        subq = select(MemoryEntryEntity.id).where(MemoryEntryEntity.user_id == user_id).order_by(MemoryEntryEntity.created_at.desc()).limit(limit).subquery()
+
+        # 2) update + returning
+        stmt = (
+            update(MemoryEntryEntity).where(MemoryEntryEntity.id.in_(select(subq.c.id))).values(is_active=True).returning(MemoryEntryEntity)  # ← ask SQL to spill back full rows
         )
 
-        return [entry.to_domain() for entry in entries]
+        result = self.session.execute(stmt)
+        # scalars() gives ORM‐mapped objects
+        entities = result.scalars().all()
+        self.session.commit()
+
+        return [ent.to_domain() for ent in entities]
 
     def search_paginated(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
         """Search memory with pagination support"""
@@ -72,7 +80,7 @@ class MemoryManager(BaseRepository):
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
 
         # Get paginated results
-        stmt = (
+        sub_q = (
             select(MemoryEntryEntity)
             .where(MemoryEntryEntity.user_id == user_id, MemoryEntryEntity.is_active)
             .order_by(MemoryEntryEntity.embedding.l2_distance(embeddings), MemoryEntryEntity.created_at.desc())
@@ -80,7 +88,11 @@ class MemoryManager(BaseRepository):
             .limit(page_size)
         )
 
-        entities = self.session.scalars(stmt).all()
-        results = [entity.to_domain() for entity in entities]
+        stmt = update(MemoryEntryEntity).where(MemoryEntryEntity.id.in_(select(sub_q.c.id))).values(is_active=True).returning(MemoryEntryEntity)
+        result = self.session.execute(stmt)
+        # scalars() gives ORM‐mapped objects
+        entities = result.scalars().all()
+        self.session.commit()
 
+        results = [entity.to_domain() for entity in entities]
         return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)

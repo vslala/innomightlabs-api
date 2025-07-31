@@ -45,6 +45,7 @@ class ServiceFactory:
         return ChatbotService(
             chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
             embedding_model=ChatbotFactory.get_embedding_model(name="titan"),
+            memory_manager=RepositoryFactory.get_memory_manager_repository(),
         )
 
     @staticmethod

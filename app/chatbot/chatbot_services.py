@@ -1,14 +1,17 @@
+from collections import deque
 from typing import AsyncGenerator
 
 from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentMessage, AgentMessageSummary, AgentRequest, AgentState, AgentStreamResponse
+from app.chatbot.workflows.memories.memory_manager import MemoryManager
 from app.common.vector_embedders import BaseVectorEmbedder
 
 
 class ChatbotService:
-    def __init__(self, chatbot: BaseChatbot, embedding_model: BaseVectorEmbedder) -> None:
+    def __init__(self, chatbot: BaseChatbot, embedding_model: BaseVectorEmbedder, memory_manager: MemoryManager) -> None:
         self.chatbot = chatbot
         self.embedding_model = embedding_model
+        self.memory_manager = memory_manager
 
     """
     Service class for handling chatbot-related operations.
@@ -17,11 +20,8 @@ class ChatbotService:
 
     async def ask_async(self, request: AgentRequest) -> AsyncGenerator[AgentStreamResponse, None]:
         """Send a message to the chatbot and return the response."""
-        state = AgentState(
-            user=request.user,
-            messages=request.message_history,
-            user_message=request.message,
-        )
+        latest_archival_memory = self.memory_manager.read(user_id=request.user.id, limit=10)
+        state = AgentState(user=request.user, messages=request.message_history, user_message=request.message, archival_memory=deque(latest_archival_memory))
         from app.common.config import WorkflowFactory
 
         workflow = WorkflowFactory.create_workflow(

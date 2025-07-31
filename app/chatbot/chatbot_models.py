@@ -44,7 +44,7 @@ class MemoryEntry(BaseModel):
         tokens = len(content) / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
         if tokens > token_limit:
             content = self.content[-token_limit:]
-        header = f"[Memory Block: {self.memory_type.value} | id={self.id} | max_tokens={token_limit}]\n"
+        header = f"\n[Memory Block: {self.memory_type.value} | id={self.id} | max_tokens={token_limit}]\n"
         return header + content
 
 
@@ -131,7 +131,10 @@ class AgentState(BaseModel):
     archival_memory: Deque[MemoryEntry] = Field(default=deque([]))
     recall_memory: Deque[MemoryEntry] = Field(default=deque([]))
 
+    # Pagination summary
     current_conversation_history_page: int = Field(default=1)
+    current_archival_memory_page: int = Field(default=1)
+    total_archival_memory_pages: int = Field(default=1)
 
     # Multi-step reasoning fields
     phase: Phase = Field(default=Phase.NEED_FINAL)
@@ -151,7 +154,10 @@ class AgentState(BaseModel):
         if not self.archival_memory:
             return ""
 
-        archival_memory = ""
+        archival_memory = f"""
+Total Pages : {self.total_archival_memory_pages}
+Current Page: {self.current_archival_memory_page}\n        
+"""
 
         self.archival_memory.reverse()
         for entry in self.archival_memory:

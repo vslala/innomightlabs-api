@@ -113,7 +113,6 @@ async def archival_memory_search(state: AgentState, input: ArchivalMemorySearchP
         _manage_memory_overflow(state, MemoryType.ARCHIVAL, new_content_size)
 
     state.archival_memory.extend(results)
-    state.messages.append(AgentMessage(message=f"Found {len(results)} results. Added to archival memory.", role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)))
     return ActionResult(thought=input.thought, action="archival_memory_search", result=f"Found {len(results)} results. Added to archival memory.")
 
 
@@ -209,7 +208,7 @@ class ArchivalMemoryEvictParams(BaseModel):
 )
 async def archival_memory_evict(state: AgentState, input: ArchivalMemoryEvictParams) -> ActionResult:
     get_memory_manager().evict_memory_batch(ids=input.memory_ids)
-    state.archival_memory = deque([entry for entry in state.archival_memory if entry.id in input.memory_ids])
+    state.archival_memory = deque([entry for entry in state.archival_memory if entry.id not in input.memory_ids])
     state.messages.append(AgentMessage(message=f"Evicted archival memory with IDs: {input.memory_ids}.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
     return ActionResult(thought=input.reference, action="archival_memory_evict", result="Archival memory evicted successfully")
 

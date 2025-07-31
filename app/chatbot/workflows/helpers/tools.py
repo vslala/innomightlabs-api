@@ -309,17 +309,20 @@ async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -
     logger.info(f"\n\nRunning code...\n{input.code}\n\n")
     result = None
     try:
-        # Offload to a thread so we don’t block the loop
         task = asyncio.to_thread(_run)
         out, result_vars = await asyncio.wait_for(task, timeout=30)
-        payload = {"stdout": out}
+        execution_record = f"EXECUTED python_code_runner - Code: {input.code[:100]}{'...' if len(input.code) > 100 else ''} | Output: {out or '(no output)'}"
         state.messages.append(
-            AgentMessage(message=f"""{input.thought}\n\n{input.code}\n\n{json.dumps(payload)}""", role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)),
+            AgentMessage(message=execution_record, role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)),
         )
-        result = ActionResult(thought=input.thought, action="python_runner", result=str(payload))
+        result = ActionResult(thought=input.thought, action="python_code_runner", result=f"Code executed. Output: {out or '(no output)'}")
     except Exception as e:
         logger.error(f"Error executing code: {str(e)}")
-        result = ActionResult(thought=input.thought, action="python_runner", result=str(e))
+        error_record = f"EXECUTED python_code_runner - Code: {input.code[:100]}{'...' if len(input.code) > 100 else ''} | Error: {str(e)}"
+        state.messages.append(
+            AgentMessage(message=error_record, role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)),
+        )
+        result = ActionResult(thought=input.thought, action="python_code_runner", result=f"Code execution failed: {str(e)}")
 
     logger.info(f"\nGot the result: {result}\n\n")
     return result
@@ -381,7 +384,18 @@ async def write_data_to_disk_memory(state: AgentState) -> ActionResult:
     return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"filepath": path}))
 
 
-async def download_webpage_by_url(state: AgentState) -> ActionResult:
+class DownloadWebPageByUrlParams(BaseModel):
+    url: str
+
+
+@tool(
+    "download_webpage_by_url",
+    description="Downloads the webpage to local temp from the given url and provides the file path. You can use file reading tools to read the data.",
+    args_schema=DownloadWebPageByUrlParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def download_webpage_by_url(state: AgentState, input: DownloadWebPageByUrlParams) -> ActionResult:
     """
     Tool: fetch the URL in state.thought.params["url"], decide if it's HTML or PDF,
     extract plain text, save it in a temp file (and PDF in a temp file if needed),
@@ -428,7 +442,7 @@ async def download_webpage_by_url(state: AgentState) -> ActionResult:
                 return ActionResult(
                     thought=state.thought.thought,
                     action=state.thought.action.name,
-                    result=json.dumps(output_paths),
+                    result=f"Your downloaded webpage ({url}) can be read from following path: {txt_path}",
                 )
 
             else:
@@ -454,12 +468,7 @@ async def download_webpage_by_url(state: AgentState) -> ActionResult:
                 return ActionResult(
                     thought=state.thought.thought,
                     action=state.thought.action.name,
-                    result=json.dumps(
-                        {
-                            "url": url,
-                            "filepath": html_path,
-                        }
-                    ),
+                    result=f"Your downloaded webpage ({url}) can be read from following path: {html_path}",
                 )
 
 

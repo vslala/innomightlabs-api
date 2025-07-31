@@ -33,7 +33,7 @@ class ConversationRepository(BaseRepository):
 
     def fetch_all_conversations_by_user(self, user: User) -> list[Conversation]:
         """Retreives all conversations from the database by user id"""
-        conversations = self.session.query(ConversationEntity).filter_by(user_id=user.id).order_by(ConversationEntity.updated_at.desc()).all()
+        conversations = self.session.query(ConversationEntity).filter_by(user_id=user.id).order_by(ConversationEntity.updated_at.asc()).all()
         return [Conversation(id=e.id, title=e.title, status=e.status, summary=e.summary or "", created_at=e.created_at, updated_at=e.updated_at) for e in conversations]
 
     def find_conversation_by_id(self, conversation_id: UUID) -> Conversation:

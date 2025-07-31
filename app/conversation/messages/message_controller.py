@@ -80,6 +80,8 @@ class MessageController(BaseController):
                         conversation_id=conversation_id,
                         model_id=message.model_id,
                         parent_message_id=message.parent_message_id,
+                        created_at=message.timestamp,
+                        updated_at=message.timestamp,
                     )
 
                     agent_response = Message(

@@ -19,6 +19,6 @@ class Message(BaseModel):
     conversation_id: UUID
     role: Role
     parent_message_id: UUID | None = None
-    model_id: str = "gemini-2.0-flash"
-    created_at: datetime = datetime.now(timezone.utc)
-    updated_at: datetime = datetime.now(timezone.utc)
+    model_id: str = "claude-opus-3"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

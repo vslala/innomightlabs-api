@@ -13,7 +13,6 @@ from app.common.models import Role
 
 # Only match the FIRST JSON block to prevent infinite loops
 JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
-INNER_MONOLOGUE_RE = re.compile(r"<inner_monologue>(.*?)</inner_monologue>", re.DOTALL)
 
 
 def write_to_file(filepath: str, content: str) -> None:
@@ -162,45 +161,51 @@ User Current Query:
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:
-        logger.info(f"Validating Response\n\n{state.llm_response}...")
-        plan_of_action = state.llm_response
-        try:
-            thoughts = ""
-            monologues = extract_tag_content(plan_of_action, "inner_monologue")
-            if monologues:
-                for i, monologue in enumerate(monologues):
-                    thoughts += monologue.strip() + "\n"
-                    state.stream_queue.put_nowait(StreamChunk(content=monologue, step=StreamStep.PLANNING, step_title="Reflecting..."))
-                    state.messages.append(
-                        AgentMessage(
-                            message=f"Inner monologue: {monologue.strip()}",
-                            role=Role.ASSISTANT,
-                        )
-                    )
+        import yaml
 
-            action_json = extract_tag_content(plan_of_action, "action")
-            if action_json:
-                action_dict = json.loads(action_json[0], strict=False)
-                agent_action = Action.model_validate(action_dict)
-                state.thought = AgentThought(thought=thoughts, action=agent_action)
-                state.phase = Phase.NEED_FINAL if agent_action.name == "send_message" else Phase.NEED_TOOL
-                state.retry = 0
-                write_to_file(f"/tmp/prompts/response_{state.epochs}.md", plan_of_action)
-            else:
+        logger.info(f"Validating Response\n\n{state.llm_response}...")
+        plan = state.llm_response
+
+        try:
+            # ——— 1) inner_monologue handling unchanged ———
+            thoughts = ""
+            for monologue in extract_tag_content(plan, "inner_monologue") or []:
+                text = monologue.strip()
+                thoughts += text + "\n"
+                state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
+                state.messages.append(AgentMessage(message=f"Inner monologue: {text}", role=Role.ASSISTANT))
+
+            # ——— 2) extract raw YAML block ———
+            snippets = extract_tag_content(plan, "action")
+            if not snippets:
                 state.phase = Phase.NEED_TOOL
+                return state
+            raw_action = snippets[0]
+
+            # ——— 3) parse YAML ———
+            action_dict = yaml.safe_load(raw_action)
+
+            # ——— 4) validate & assign ———
+            agent_action = Action.model_validate(action_dict)
+            state.thought = AgentThought(thought=thoughts, action=agent_action)
+            state.phase = Phase.NEED_FINAL if agent_action.name == "send_message" else Phase.NEED_TOOL
+            state.retry = 0
+            write_to_file(f"/tmp/prompts/response_{state.epochs}.md", plan)
+
         except Exception as e:
+            # ——— existing retry/fallback logic ———
             state.retry += 1
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
-            state.messages.append(AgentMessage(message=f"Validation failed while parsing your json response: {e}", role=Role.SYSTEM))
+            state.messages.append(AgentMessage(message=f"Validation failed while parsing your yaml response: {e}", role=Role.SYSTEM))
+
             if state.retry >= 2:
-                # Force final response after 2 retries
                 logger.warning("Forcing final response after multiple validation failures")
                 state.thought = AgentThought(
                     thought="Validation failed multiple times, providing fallback response",
                     action=Action(
                         name="send_message",
                         description="Sends the message to the user",
-                        params={"message": "I apologize, but I'm having trouble processing your request. Please try rephrasing your question."},
+                        params={"message": ("I apologize, but I'm having trouble processing your request. Please try rephrasing your question.")},
                     ),
                 )
                 state.phase = Phase.NEED_FINAL

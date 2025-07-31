@@ -1,4 +1,4 @@
-import json
+import yaml
 from app.chatbot.workflows.helpers.tools import memory_actions, additional_actions
 from langchain.tools import BaseTool
 
@@ -7,6 +7,27 @@ from app.common.models import MemoryType
 
 def get_action_list(tools: list[BaseTool]):
     return [{"name": tool.name, "description": tool.description, "parameters": tool.args_schema.model_json_schema()} for tool in tools]
+
+
+def get_action_list_yaml(tools: list[BaseTool]) -> str:
+    """
+    Return a YAML document describing each tool name, description,
+    and its Pydantic JSON Schema under `parameters:`.  You can then
+    insert this whole string into your LLM system prompt and tell it:
+    ‘Please respond with your <action> block in valid YAML.’
+    """
+    actions = []
+    for tool in tools:
+        schema: dict = tool.args_schema.model_json_schema()  # type: ignore
+        actions.append({"name": tool.name, "description": tool.description, "parameters": schema})
+
+    # Dump as a top-level YAML list, preserving key order:
+    return yaml.safe_dump(
+        actions,
+        sort_keys=False,
+        explicit_start=True,  # emit leading `---`
+        default_flow_style=False,  # use block style, not inline `{…}`
+    )
 
 
 def get_label_instructions() -> str:
@@ -33,9 +54,9 @@ INTUITIVE_KNOWLEDGE = f"""
 {get_label_instructions()}
 
 ## Memory Management
-{json.dumps(get_action_list(memory_actions), indent=2)}
+{get_action_list_yaml(memory_actions)}
 ## General
-{json.dumps(get_action_list(additional_actions), indent=2)}
+{get_action_list_yaml(additional_actions)}
 
 =============== LOOP DETECTION & SELF-REFLECTION ===============
 - CRITICAL: Before taking any action, check your conversation history for "EXECUTED [action_name]" messages
@@ -49,21 +70,22 @@ INTUITIVE_KNOWLEDGE = f"""
 =================================================================
 
 =============== OUTPUT FORMAT ===============
-IMPORTANT: 
+CRITICAL YAML RULES:
+- ALWAYS use literal block scalar (|) for ALL parameter values
+- NEVER use plain scalars - they break with colons and special characters
+- Each parameter must be on its own line with proper indentation
 - Provide EXACTLY ONE inner_monologue and ONE action per response
-- DO NOT provide multiple actions
-- If repeating actions without progress, use `send_message` instead
 
 <inner_monologue>
 ...your private thought (≤50 words)...
 </inner_monologue>
 
 <action>
-{{
-  "name": "action_name",
-  "description": "what it does",
-  "params": {{ ... }}
-}}
+name: action_name
+description: what it does
+params:
+  param_name: |
+    your content here
 </action>
 
 STOP IMMEDIATELY after the closing </action> tag. You will be called again to continue.
@@ -71,44 +93,34 @@ STOP IMMEDIATELY after the closing </action> tag. You will be called again to co
 =============== EXAMPLES ===============
 ### EXAMPLE 1: Run Python Code
 - Use this when you want to execute Python code and get the result.
-- Do not include markdown fences or commentary. 
-- All strings must be valid JSON literals: escape " as \\" and newlines as \\n.
 
 <inner_monologue>
 Writing code to solve the task.
 </inner_monologue>
 
 <action>
-{{
-    "name": "python_code_runner",
-    "description": "Executes the provided python code",
-    "params": {{ "code": "..." }}
-}}
+name: python_code_runner
+description: Executes the provided python code
+params:
+  code: |
+    ...
 </action>
 
 ### EXAMPLE 2: Final Reply to User.
 - Even if you have to send the code snippet as a final response, you will still use `send_message` action.
-- Use this when you want to SEND CODE and get the result.
-  - **Escape internal quotes**: change every `"` inside the text to `\\"`.
-  - **Escape newlines**: replace every real line break with `\\n`.  
-
-Here’s a minimal “one-liner” example of how the top of your JSON should look (formatted here for readability, but imagine this all on one line with `\\n` and `\\"`):
+- ALWAYS ESCAPE all JSON symbols like double quotes " like this \\" from the params value before sending the message or it will break the flow.
 
 <inner_monologue>
 I have the answer; time to respond.
 </inner_monologue>
 
-```json
-{{
-  "name": "send_message",
-  "description": "Sends the message to the user",
-  "params": {{
-    "message": "Here's an optimized version of the batch memory eviction method using SQLAlchemy's bulk update:\\n\\n```python\\n" +
-               "def evict_memory_batch(self, ids: list[UUID]) -> None:\\n" +
-               "    \\"\\"\\"Makes a batch of memories in-active using bulk update\\"\\"\\"\\n" +
-               "    # …etc…\\n```"
-  }}
-}}
+<action>
+name: send_message
+description: Sends the message to the user
+params:
+  message: |
+    Hello there. How you doi\"n?
+</action>
 
 ### EXAMPLE 3
 Breaking Out of Loop
@@ -118,11 +130,11 @@ I've searched multiple times with no new results. Time to provide what I know an
 </inner_monologue>
 
 <action>
-{{
-  "name": "send_message",
-  "description": "Sends the message to the user",
-  "params": {{ "message": "I've analyzed the available information but need more context. Could you provide..." }}
-}}
+name: send_message
+description: Sends the message to the user
+params:
+  message: |
+    I've analyzed the available information but need more context. Could you provide...
 </action>
 =============== END OF EXAMPLES ===============
 IMPORTANT: If you think you have executed the same action previously, STOP and instead use `send_message` action to send the message to the user.

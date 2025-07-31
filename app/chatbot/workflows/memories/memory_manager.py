@@ -41,13 +41,12 @@ class MemoryManager(BaseRepository):
     def evict_memory(self, entry_id: UUID) -> None:
         """Makes the memory in-active"""
 
-        entry = self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id == entry_id).one()
-        entry.is_active = False
+        self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id == entry_id).delete()
         self.commit()
 
     def evict_memory_batch(self, ids: list[UUID]) -> None:
         """Makes a batch of memories in-active"""
-        self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id.in_(ids)).update({MemoryEntryEntity.is_active: False}, synchronize_session=False)
+        self.session.query(MemoryEntryEntity).filter(MemoryEntryEntity.id.in_(ids)).delete()
         self.commit()
 
     def read(self, user_id: UUID, limit: int = 100) -> list[MemoryEntry]:

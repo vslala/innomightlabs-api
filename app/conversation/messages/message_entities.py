@@ -26,13 +26,13 @@ class MessageEntity(BaseEntity):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
         doc="Timestamp when the Message was created",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         doc="Timestamp when the Message was last updated",
     )

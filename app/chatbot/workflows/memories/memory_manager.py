@@ -67,14 +67,14 @@ class MemoryManager(BaseRepository):
         offset = (page - 1) * page_size
 
         # Get total count
-        count_stmt = select(func.count(MemoryEntryEntity.id)).where(MemoryEntryEntity.user_id == user_id)
+        count_stmt = select(func.count(MemoryEntryEntity.id)).where(MemoryEntryEntity.user_id == user_id, MemoryEntryEntity.is_active)
         total_count = self.session.scalar(count_stmt) or 0
         total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
 
         # Get paginated results
         stmt = (
             select(MemoryEntryEntity)
-            .where(MemoryEntryEntity.user_id == user_id)
+            .where(MemoryEntryEntity.user_id == user_id, MemoryEntryEntity.is_active)
             .order_by(MemoryEntryEntity.embedding.l2_distance(embeddings), MemoryEntryEntity.created_at.desc())
             .offset(offset)
             .limit(page_size)

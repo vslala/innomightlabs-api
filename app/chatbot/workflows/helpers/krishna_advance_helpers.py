@@ -173,7 +173,7 @@ User Current Query:
                     state.stream_queue.put_nowait(StreamChunk(content=monologue, step=StreamStep.PLANNING, step_title="Reflecting..."))
                     state.messages.append(
                         AgentMessage(
-                            message=f"Inner monologue {i + 1}: {monologue.strip()}",
+                            message=f"Inner monologue: {monologue.strip()}",
                             role=Role.ASSISTANT,
                         )
                     )

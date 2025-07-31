@@ -27,6 +27,7 @@ class MessageRequest(BaseModel):
     parent_message_id: UUID | None = None
     model_id: str = "gemini-2.0-flash"
     agent: AgentVersion = Field(default=AgentVersion.KRISHNA_MINI)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MessageResponse(BaseModel):

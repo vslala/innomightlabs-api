@@ -1,5 +1,5 @@
 from collections.abc import AsyncGenerator
-import json
+from datetime import datetime, timezone
 from loguru import logger
 import re
 
@@ -101,8 +101,8 @@ class KrishnaAdvanceWorkflowHelper:
         state.observations.append(result)
         state.messages.append(
             AgentMessage(
-                message=f"Executed action: {selected_tool_name} with params: {json.dumps(input_params, indent=2)} and result is:\n{result.result}",
-                role=Role.SYSTEM,
+                message=result.result,
+                role=Role.TOOL,
                 timestamp=result.timestamp,
             )
         )
@@ -146,11 +146,9 @@ class KrishnaAdvanceWorkflowHelper:
 {state.build_conversation_history()}
 ============ END OF CONVERSATION HISTORY ===============
 
+Current User Query:
+[user - ({datetime.now(timezone.utc).isoformat()})] - {state.user_message}
 
-{state.build_observations()}
-
-User Current Query:
-[user] - {state.user_message}
 """
         state.prompt = state.build_prompt(prompt=prompt)
         logger.info(f"Prompt built for epoch {state.epochs}")
@@ -158,6 +156,7 @@ User Current Query:
         write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
         logger.debug(f"\n==== CONVERSATION HISTORY ====\n\n{state.build_conversation_history()}\n")
         logger.debug(f"\n==== ARCHIVAL MEMORY ====\n{state.build_archival_memory()}\n")
+        logger.debug(f"\nObservations\n{state.build_observations()}")
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:
@@ -173,7 +172,6 @@ User Current Query:
                 text = monologue.strip()
                 thoughts += text + "\n"
                 state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
-                state.messages.append(AgentMessage(message=f"Inner monologue: {text}", role=Role.ASSISTANT))
 
             # ——— 2) extract raw YAML block ———
             snippets = extract_tag_content(plan, "action")

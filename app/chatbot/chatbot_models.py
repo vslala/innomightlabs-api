@@ -67,7 +67,7 @@ class ActionResult(BaseModel):
     result: str
 
     def __str__(self) -> str:
-        return f"Thought: {self.thought}\nAction: {self.action}\nResult: {self.result}"
+        return f"[{self.action} - {datetime.now(timezone.utc)}] {self.result}"
 
 
 class Action(BaseModel):
@@ -180,29 +180,19 @@ Current Page: {self.current_archival_memory_page}\n
 
         curr_messages = self.messages[-page_size:]
         curr_messages.sort(key=lambda msg: msg.timestamp)
-
         messages = "\n".join(msg.get_formatted_prompt() for msg in curr_messages)
         return f"""
 ## CONVERSATION HISTORY
 {messages}
 """
 
-    def build_observations(self, curr_page: int = 1) -> str:
+    def build_observations(self) -> str:
         """Build the observation from the state."""
         if not self.observations:
             return ""
         page_size = MemoryManagementConfig.OBSERVATIONS_PAGE_SIZE
-        start = (page_size * curr_page) - page_size
-        end = start + page_size + 1
-
-        curr_obvs = self.observations[start:end]
-
-        prompt = "==================== PREVIOUS ACTION RESULTS ====================\n"
-        for idx, obs in enumerate(curr_obvs):
-            prompt += f"### Result {(idx + 1)}.\n"
-            prompt += f"{obs}\n"
-        prompt += "==================== END OF PREVIOUS ACTION RESULTS ================\n"
-        return prompt
+        observations = self.observations[-page_size:]
+        return "\n".join([str(obv) for obv in observations])
 
     def list_available_temp_files(self) -> str:
         """List the available temporary files from the state."""

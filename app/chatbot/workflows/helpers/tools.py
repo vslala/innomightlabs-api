@@ -58,7 +58,7 @@ def _manage_memory_overflow(state: AgentState, memory_type_enum: MemoryType, new
     from app.common.models import MemoryManagementConfig
 
     # Get the appropriate memory deque based on memory type
-    if memory_type_enum in [MemoryType.ARCHIVAL, MemoryType.SUMMARY, MemoryType.PROFILE, MemoryType.PERSONA]:
+    if memory_type_enum in [MemoryType.ARCHIVAL, MemoryType.SUMMARY, MemoryType.USER_PROFILE, MemoryType.PERSONA]:
         memory_deque = state.archival_memory
     elif memory_type_enum == MemoryType.RECALL:
         memory_deque = state.recall_memory
@@ -144,7 +144,7 @@ async def archival_memory_insert(state: AgentState, input: ArchivalMemoryInsertP
 
     get_memory_manager().update_memory(entry)
     state.archival_memory.append(entry)
-    return ActionResult(thought=input.reference, action="archival_memory_insert", result="Archival memory inserted successfully")
+    return ActionResult(thought=input.reference, action="archival_memory_insert", result=f"Archival memory inserted with ID: {entry.id} and data: {entry.content}")
 
 
 class ArchivalMemoryUpdateParams(BaseModel):
@@ -182,14 +182,7 @@ async def archival_memory_update(state: AgentState, input: ArchivalMemoryUpdateP
             state.archival_memory[idx] = entry
             break
 
-    state.messages.append(
-        AgentMessage(
-            message=f"Updated archival memory with ID {input.memory_id}.\nNew content: {input.data}\nMetadata: {json.dumps(input.metadata, indent=2)}",
-            role=Role.SYSTEM,
-            timestamp=datetime.now(timezone.utc),
-        )
-    )
-    return ActionResult(thought=input.reference, action="archival_memory_update", result="Archival memory updated successfully")
+    return ActionResult(thought=input.reference, action="archival_memory_update", result=f"Archival memory updated with ID: {entry.id} and content: {entry.content}")
 
 
 class ArchivalMemoryEvictParams(BaseModel):
@@ -209,8 +202,7 @@ class ArchivalMemoryEvictParams(BaseModel):
 async def archival_memory_evict(state: AgentState, input: ArchivalMemoryEvictParams) -> ActionResult:
     get_memory_manager().evict_memory_batch(ids=input.memory_ids)
     state.archival_memory = deque([entry for entry in state.archival_memory if entry.id not in input.memory_ids])
-    state.messages.append(AgentMessage(message=f"Evicted archival memory with IDs: {input.memory_ids}.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
-    return ActionResult(thought=input.reference, action="archival_memory_evict", result="Archival memory evicted successfully")
+    return ActionResult(thought=input.reference, action="archival_memory_evict", result=f"Archival memory with Ids: {input.memory_ids} evicted successfully")
 
 
 class SendMessageParams(BaseModel):
@@ -239,13 +231,13 @@ class RecallMemoryParams(BaseModel):
 
 
 @tool(
-    "recall_memory",
-    description="Recalls memory based on the provided query and adds it to the Recall Memory block",
+    "conversation_search",
+    description="Recalls past conversation, so if something is not available in Archival memory, look for in the past conversation memory",
     args_schema=RecallMemoryParams,
     infer_schema=False,
     return_direct=True,
 )
-async def recall_memory(state: AgentState, input: RecallMemoryParams) -> ActionResult:
+async def conversation_search(state: AgentState, input: RecallMemoryParams) -> ActionResult:
     """
     Recalls memory based on the provided query and adds it to the Recall Memory block.
     """
@@ -253,7 +245,7 @@ async def recall_memory(state: AgentState, input: RecallMemoryParams) -> ActionR
     results = await get_message_repository().search_all_by_user_id_and_embeddings(user_id=state.user.id, embeddings=embeddings, top_k=3)
 
     if not results:
-        return ActionResult(thought=input.reference, action="recall_memory", result="No relevant memory found.")
+        return ActionResult(thought=input.reference, action="conversation_search", result="No relevant memory found.")
 
     # Add results to recall memory
     entries = [
@@ -278,7 +270,7 @@ async def recall_memory(state: AgentState, input: RecallMemoryParams) -> ActionR
     state.recall_memory.extend(entries)
     state.messages.append(AgentMessage(message=f"Found {len(entries)} relevant memories. Added to recall memory.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
 
-    return ActionResult(thought=input.reference, action="recall_memory", result=f"Found {len(entries)} relevant memories. Added to recall memory.")
+    return ActionResult(thought=input.reference, action="conversation_search", result=f"Found {len(entries)} relevant conversations. Added to recall memory.")
 
 
 class PythonCodeRunnerParams(BaseModel):
@@ -288,7 +280,13 @@ class PythonCodeRunnerParams(BaseModel):
     code: str
 
 
-@tool("python_code_runner", description="Executes the provide python code", args_schema=PythonCodeRunnerParams, infer_schema=True, return_direct=True)
+@tool(
+    "python_code_runner",
+    description="Executes the provide python code. Does not send it to user. Provides the result to Krishna.",
+    args_schema=PythonCodeRunnerParams,
+    infer_schema=True,
+    return_direct=True,
+)
 async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -> ActionResult:
     """
     Execute the provided Python code snippet.
@@ -310,24 +308,16 @@ async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -
     try:
         task = asyncio.to_thread(_run)
         out, result_vars = await asyncio.wait_for(task, timeout=30)
-        execution_record = f"EXECUTED python_code_runner - Code: {input.code[:100]}{'...' if len(input.code) > 100 else ''} | Output: {out or '(no output)'}"
-        state.messages.append(
-            AgentMessage(message=execution_record, role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)),
-        )
-        result = ActionResult(thought=input.thought, action="python_code_runner", result=f"Code executed. Output: {out or '(no output)'}")
+        result = ActionResult(thought=input.thought, action="python_code_runner", result=f"Code:\n{input.code}\nCode executed. Output: {out or '(no output)'}")
     except Exception as e:
         logger.error(f"Error executing code: {str(e)}")
-        error_record = f"EXECUTED python_code_runner - Code: {input.code[:100]}{'...' if len(input.code) > 100 else ''} | Error: {str(e)}"
-        state.messages.append(
-            AgentMessage(message=error_record, role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)),
-        )
         result = ActionResult(thought=input.thought, action="python_code_runner", result=f"Code execution failed: {str(e)}")
 
     logger.info(f"\nGot the result: {result}\n\n")
     return result
 
 
-memory_actions: list[BaseTool] = [archival_memory_search, archival_memory_insert, archival_memory_update, archival_memory_evict, recall_memory]
+memory_actions: list[BaseTool] = [archival_memory_search, archival_memory_insert, archival_memory_update, archival_memory_evict, conversation_search]
 additional_actions: list[BaseTool] = [send_message, python_code_runner]
 available_actions = memory_actions + additional_actions
 

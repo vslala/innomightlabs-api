@@ -45,29 +45,26 @@ Values: {", ".join(values)}
 
 INTUITIVE_KNOWLEDGE = f"""
 =============== MEMORY MANAGEMENT ===============
-- When user provides information, make ONE decision: search, update, insert, or respond
-- If you can see relevant info in archival memory blocks above, directly update or respond
-- Only search if you cannot see the relevant information in the visible memory blocks
+- When user sends a message, check your current context for answer. If information is available, use `send_message` action
+  to send the message to the user.
+- If you can see relevant info in archival memory blocks, use that to `send_message` to the user
+- Only search if you cannot see the relevant information in your core-memory
 - Be decisive - don't search and then immediately update in the same conversation
+- Whenever you make an action - WAIT for the tool's response. You will find the action's result in your core-memory next time you are invoked
+
 =================================================
 =============== AVAILABLE ACTIONS ===============
 {get_label_instructions()}
 
 ## Memory Management
+- CRITICAL RULE: DO NOT perform any memory action if the required information is already present in your core-memory.
+- CHECK if what user is saying is already part of your core-memory. Always perform `archival_memory_search` first.
+- IF you don't find something in Archival Memory Search, search for your past conversation using `conversation_search`
+
 {get_action_list_yaml(memory_actions)}
 ## General
 {get_action_list_yaml(additional_actions)}
 
-=============== LOOP DETECTION & SELF-REFLECTION ===============
-- CRITICAL: Before taking any action, check your conversation history for "EXECUTED [action_name]" messages
-- If you see "EXECUTED python_code_runner" with similar code, DO NOT repeat it - use send_message instead
-- If you notice you're repeating the same action without progress, STOP and change approach
-- Check your previous messages - if you've already searched/tried something, don't repeat it
-- If stuck in a loop, use send_message to ask for clarification or provide what you know so far
-- Self-reflect: Am I making progress? Have I done this action before with the same result?
-- When you wake up, the last message in your conversation history would be the result of your previous action
-- Look for patterns like "EXECUTED python_code_runner - Code: [similar code]" to avoid repetition
-=================================================================
 
 =============== OUTPUT FORMAT ===============
 CRITICAL YAML RULES:
@@ -75,6 +72,7 @@ CRITICAL YAML RULES:
 - Use proper YAML syntax for lists, objects, and simple values
 - For lists: use proper YAML list format with dashes (-)
 - For strings with special chars: use literal block scalar (|)
+- ALWAYS quote date values like "2025-08-01" to prevent YAML auto-parsing
 - Provide EXACTLY ONE inner_monologue and ONE action per response
 
 <inner_monologue>
@@ -110,6 +108,7 @@ params:
 ### EXAMPLE 2: Final Reply to User.
 - Even if you have to send the code snippet as a final response, you will still use `send_message` action.
 - ALWAYS ESCAPE all JSON symbols like double quotes " like this \\" from the params value before sending the message or it will break the flow.
+- Observe the time different between previous message and current message.
 
 <inner_monologue>
 I have the answer; time to respond.
@@ -155,5 +154,4 @@ params:
     I've analyzed the available information but need more context. Could you provide...
 </action>
 =============== END OF EXAMPLES ===============
-IMPORTANT: If you think you have executed the same action previously, STOP and instead use `send_message` action to send the message to the user.
 """

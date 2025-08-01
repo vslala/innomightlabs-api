@@ -20,7 +20,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
 
     def __init__(self, state: AgentState, chatbot: BaseChatbot):
         super().__init__(state, chatbot)
-        self.conversation_history = self._build_conversation_history()  # cache history for lifecycle of the workflow
+        # state.messages.append(AgentMessage(message=state.user_message, role=Role.USER))
 
     async def run(self) -> AsyncGenerator[StreamChunk, None]:
         """

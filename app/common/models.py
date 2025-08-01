@@ -22,6 +22,7 @@ class Role(Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+    TOOL = "tool"
 
 
 class StreamStep(Enum):
@@ -45,7 +46,7 @@ class RequestHeaders(BaseModel):
 
 
 class MemoryManagementConfig(BaseModel):
-    CONTEXT_LENGTH: ClassVar[int] = 5000
+    CONTEXT_LENGTH: ClassVar[int] = 2000
     AVERAGE_TOKEN_SIZE: ClassVar[int] = 4
 
     BASE_PROMPT_TOKENS: ClassVar[int] = int(CONTEXT_LENGTH * 0.30)
@@ -58,7 +59,7 @@ class MemoryManagementConfig(BaseModel):
     ARCHIVAL_MEMORY_LIMIT: ClassVar[int] = ARCHIVAL_MEMORY_TOKENS // AVERAGE_TOKEN_SIZE
     RECALL_MEMORY_LIMIT: ClassVar[int] = RECALL_MEMORY_TOKENS // AVERAGE_TOKEN_SIZE
 
-    CONVERSATION_PAGE_SIZE: ClassVar[int] = 10
+    CONVERSATION_PAGE_SIZE: ClassVar[int] = 5
     OBSERVATIONS_PAGE_SIZE: ClassVar[int] = 10
     MEMORY_SEARCH_PAGE_SIZE: ClassVar[int] = 10
     MEMORY_OVERFLOW_THRESHOLD: ClassVar[float] = 0.8
@@ -66,7 +67,7 @@ class MemoryManagementConfig(BaseModel):
 
 class MemoryType(Enum):
     PERSONA = ("persona", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.05))
-    PROFILE = ("profile", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.05))
+    USER_PROFILE = ("user_profile", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.05))
     RECALL = ("recall", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.20))
     SUMMARY = ("summary", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.05))
     ARCHIVAL = ("archival", int(MemoryManagementConfig.CONTEXT_LENGTH * 0.01))

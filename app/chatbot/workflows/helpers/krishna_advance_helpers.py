@@ -5,8 +5,7 @@ import re
 
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, AgentMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
-from app.chatbot.workflows.prompts.system.base_prompt import BASE_PROMPT
+from app.chatbot.chatbot_models import Action, ActionResult, AgentMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.workflows.prompts.system.intuitive_knowledge import INTUITIVE_KNOWLEDGE
 from app.common.models import Role
 
@@ -67,16 +66,44 @@ class KrishnaAdvanceWorkflowHelper:
     def __init__(self, chatbot: BaseChatbot) -> None:
         self.chatbot = chatbot
 
+    def _check_duplicate_tool_call(self, state: AgentState) -> bool:
+        """Check if the same tool is being called with identical parameters"""
+        import hashlib
+        import json
+
+        if not state.thought or not state.last_tool_call:
+            return False
+
+        current_tool = state.thought.action.name
+        current_params = json.dumps(state.thought.action.params, sort_keys=True)
+        current_hash = hashlib.md5(current_params.encode()).hexdigest()
+
+        last_tool, last_hash = state.last_tool_call
+        return current_tool == last_tool and current_hash == last_hash
+
     async def router(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         """
         Execute the actions in the plan.
         This method processes each action in the plan and executes it.
         """
         import app.chatbot.workflows.helpers.tools as Tools
+        import hashlib
+        import json
 
         logger.info("\n\nExecuting Actions...\n\n")
         if not state.thought:
             raise ValueError("No thought provided")
+
+        # Guard against duplicate tool calls
+        if self._check_duplicate_tool_call(state):
+            logger.warning(f"Duplicate tool call detected: {state.thought.action.name}")
+            result = ActionResult(
+                thought="Duplicate tool call detected", action="guard", result="Skipped duplicate tool call - same tool with identical parameters already executed"
+            )
+            state.observations.append(result)
+            state.thought = None
+            yield state
+            return
 
         selected_tool_name = state.thought.action.name
         if selected_tool_name not in Tools.new_tools:
@@ -84,8 +111,11 @@ class KrishnaAdvanceWorkflowHelper:
             raise ValueError(f"Unknown tool selected by the assistant: {selected_tool_name}")
 
         selected_tool = Tools.new_tools[selected_tool_name]
-
         input_params = state.thought.action.params
+
+        # Update last tool call tracking
+        params_hash = hashlib.md5(json.dumps(input_params, sort_keys=True).encode()).hexdigest()
+        state.last_tool_call = (selected_tool_name, params_hash)
 
         # Handle LangChain tools vs custom async functions differently
         if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
@@ -99,14 +129,6 @@ class KrishnaAdvanceWorkflowHelper:
             result = await selected_tool(state)
 
         state.observations.append(result)
-        state.messages.append(
-            AgentMessage(
-                message=result.result,
-                role=Role.TOOL,
-                timestamp=result.timestamp,
-            )
-        )
-
         logger.info(f"Got the observations: {result}")
         state.thought = None
         yield state
@@ -128,23 +150,19 @@ class KrishnaAdvanceWorkflowHelper:
         memory_alert_text = f"\n{memory_alert}\n" if memory_alert else ""
 
         prompt = f"""
-{BASE_PROMPT}
-
 {INTUITIVE_KNOWLEDGE}
 
 {memory_alert_text}
 
-============ ARCHIVAL MEMORY BLOCKS ==================
+Archival Memory Blocks:
 {state.build_archival_memory()}
-============ END OF ARCHIVAL MEMORY BLOCKS ===============
 
-============ RECALL MEMORY BLOCKS ===================
+Recalled Memory Blocks:
 {state.build_recall_memory()}
-============ END OF RECALL MEMORY BLOCKS ================
 
-============ CONVERSATION HISTORY ==================
+Recent Conversation History:
 {state.build_conversation_history()}
-============ END OF CONVERSATION HISTORY ===============
+{state.build_observations()}
 
 Current User Query:
 [user - ({datetime.now(timezone.utc).isoformat()})] - {state.user_message}
@@ -154,9 +172,7 @@ Current User Query:
         logger.info(f"Prompt built for epoch {state.epochs}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
         write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
-        logger.debug(f"\n==== CONVERSATION HISTORY ====\n\n{state.build_conversation_history()}\n")
-        logger.debug(f"\n==== ARCHIVAL MEMORY ====\n{state.build_archival_memory()}\n")
-        logger.debug(f"\nObservations\n{state.build_observations()}")
+        logger.debug(f"Prompt:\n{state.prompt}")
         return state
 
     def validate_response(self, state: AgentState) -> AgentState:

@@ -12,8 +12,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 import wikipedia
 
-from app.chatbot.chatbot_models import ActionResult, AgentMessage, AgentState, MemoryEntry, MemoryType, StreamChunk
-from app.common.models import Role, StreamStep
+from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, MemoryType, StreamChunk
+from app.common.models import StreamStep
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
 from langchain.tools import tool, BaseTool
@@ -98,7 +98,7 @@ class ArchivalMemorySearchParams(BaseModel):
 
 @tool(
     "archival_memory_search",
-    description="Retrieve information from your extensive archival memory into your core working memory.",
+    description="Retrieve information from your extensive archival memory into your working context.",
     args_schema=ArchivalMemorySearchParams,
     infer_schema=False,
     return_direct=True,
@@ -111,7 +111,10 @@ async def archival_memory_search(state: AgentState, input: ArchivalMemorySearchP
     if results:
         new_content_size = sum(len(entry.content) for entry in results)
         _manage_memory_overflow(state, MemoryType.ARCHIVAL, new_content_size)
-
+    else:
+        return ActionResult(
+            thought=input.thought, action="archival_memory_search", result="No results found in archival memory. Try using `conversation_search` to look into past conversations."
+        )
     state.archival_memory.extend(results)
     return ActionResult(thought=input.thought, action="archival_memory_search", result=f"Found {len(results)} results. Added to archival memory.")
 
@@ -119,7 +122,6 @@ async def archival_memory_search(state: AgentState, input: ArchivalMemorySearchP
 class ArchivalMemoryInsertParams(BaseModel):
     """Add new data to your archival memory, expanding your knowledge base."""
 
-    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
     data: str
     label: str
     metadata: dict[str, str] = Field(default={})
@@ -144,13 +146,12 @@ async def archival_memory_insert(state: AgentState, input: ArchivalMemoryInsertP
 
     get_memory_manager().update_memory(entry)
     state.archival_memory.append(entry)
-    return ActionResult(thought=input.reference, action="archival_memory_insert", result=f"Archival memory inserted with ID: {entry.id} and data: {entry.content}")
+    return ActionResult(thought="Insert into archival memory", action="archival_memory_insert", result=f"Archival memory inserted with ID: {entry.id} and data: {entry.content}")
 
 
 class ArchivalMemoryUpdateParams(BaseModel):
     """Updates existing archival memory, keeping your knowledge base up-to-date and accurate"""
 
-    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
     label: str
     memory_id: UUID
     data: str
@@ -182,13 +183,14 @@ async def archival_memory_update(state: AgentState, input: ArchivalMemoryUpdateP
             state.archival_memory[idx] = entry
             break
 
-    return ActionResult(thought=input.reference, action="archival_memory_update", result=f"Archival memory updated with ID: {entry.id} and content: {entry.content}")
+    return ActionResult(
+        thought="Update archival memory block in place", action="archival_memory_update", result=f"Archival memory updated with ID: {entry.id} and content: {entry.content}"
+    )
 
 
 class ArchivalMemoryEvictParams(BaseModel):
     """Updates existing archival memory, keeping your knowledge base up-to-date and accurate"""
 
-    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
     memory_ids: list[UUID]
 
 
@@ -202,7 +204,11 @@ class ArchivalMemoryEvictParams(BaseModel):
 async def archival_memory_evict(state: AgentState, input: ArchivalMemoryEvictParams) -> ActionResult:
     get_memory_manager().evict_memory_batch(ids=input.memory_ids)
     state.archival_memory = deque([entry for entry in state.archival_memory if entry.id not in input.memory_ids])
-    return ActionResult(thought=input.reference, action="archival_memory_evict", result=f"Archival memory with Ids: {input.memory_ids} evicted successfully")
+    return ActionResult(
+        thought="Remove memory blocks from working memory to free up space",
+        action="archival_memory_evict",
+        result=f"Archival memory with Ids: {input.memory_ids} evicted successfully",
+    )
 
 
 class SendMessageParams(BaseModel):
@@ -223,54 +229,48 @@ async def send_message(state: AgentState, input: SendMessageParams) -> ActionRes
     return ActionResult(thought="", action="send_message", result="Message sent successfully!")
 
 
-class RecallMemoryParams(BaseModel):
+class ConversationSearchParams(BaseModel):
     """Recalls memory based on the provided query"""
 
-    reference: str = Field(default="", description="Reference to add to the conversation history for you to gain context.")
     query: str
+    page: int = Field(default=1)
 
 
 @tool(
     "conversation_search",
-    description="Recalls past conversation, so if something is not available in Archival memory, look for in the past conversation memory",
-    args_schema=RecallMemoryParams,
+    description="""Loads older conversation into working context as "recall" memory blocks
+        - If it returns [], _you must not call conversation_search again for the same query_.  
+        - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
+        """,
+    args_schema=ConversationSearchParams,
     infer_schema=False,
     return_direct=True,
 )
-async def conversation_search(state: AgentState, input: RecallMemoryParams) -> ActionResult:
+async def conversation_search(state: AgentState, input: ConversationSearchParams) -> ActionResult:
     """
-    Recalls memory based on the provided query and adds it to the Recall Memory block.
+    Recalls memory based on the provided query with pagination support.
     """
+    from app.chatbot.chatbot_models import PaginatedMemoryResult
+
     embeddings = get_embedder().embed_single_text(input.query)
-    results = await get_message_repository().search_all_by_user_id_and_embeddings(user_id=state.user.id, embeddings=embeddings, top_k=3)
+    paginated_result: PaginatedMemoryResult = await get_message_repository().search_paginated_by_user_id_and_embeddings(
+        user_id=state.user.id, embeddings=embeddings, page=input.page
+    )
 
-    if not results:
-        return ActionResult(thought=input.reference, action="conversation_search", result="No relevant memory found.")
-
-    # Add results to recall memory
-    entries = [
-        MemoryEntry(
-            id=message.id,
-            user_id=state.user.id,
-            memory_type=MemoryType.RECALL,
-            content=message.content,
-            is_active=True,
-            embedding=message.embedding if message.embedding else [],
-            created_at=message.created_at,
-        )
-        for message in results
-    ]
+    if not paginated_result.results:
+        return ActionResult(thought="", action="conversation_search", result="[]")
 
     # Check for overflow before adding entries
-    if entries:
-        new_content_size = sum(len(entry.content) for entry in entries)
+    if paginated_result.results:
+        new_content_size = sum(len(entry.content) for entry in paginated_result.results)
         _manage_memory_overflow(state, MemoryType.RECALL, new_content_size)
 
-    get_memory_manager().update_memory_batch(entries)
-    state.recall_memory.extend(entries)
-    state.messages.append(AgentMessage(message=f"Found {len(entries)} relevant memories. Added to recall memory.", role=Role.SYSTEM, timestamp=datetime.now(timezone.utc)))
+    # Only add to state memory, don't persist to database
+    state.recall_paginated_result = paginated_result
 
-    return ActionResult(thought=input.reference, action="conversation_search", result=f"Found {len(entries)} relevant conversations. Added to recall memory.")
+    result_msg = "Older conversation loaded into working context"
+
+    return ActionResult(thought="", action="conversation_search", result=result_msg)
 
 
 class PythonCodeRunnerParams(BaseModel):
@@ -282,7 +282,7 @@ class PythonCodeRunnerParams(BaseModel):
 
 @tool(
     "python_code_runner",
-    description="Executes the provide python code. Does not send it to user. Provides the result to Krishna.",
+    description="Executes python code and adds the result to working context",
     args_schema=PythonCodeRunnerParams,
     infer_schema=True,
     return_direct=True,
@@ -570,22 +570,8 @@ async def intermediate_response_tool(state: AgentState) -> ActionResult:
     return ActionResult(thought=state.thought.thought, action="intermediate_response", result=response)
 
 
-# Define tools dictionary after all functions are defined
-tools = {
-    "read_data_from_disk_memory": read_data_from_disk_memory,
-    "write_data_to_disk_memory": write_data_to_disk_memory,
-    "fetch_webpage": download_webpage_by_url,
-    "python_runner": python_code_runner_tool,
-    "wikipedia_search": wikipedia_search_tool,
-    "final_response": final_response_tool,
-    "intermediate_response": intermediate_response_tool,
-}
-
 new_tools = {}
 for my_tool in memory_actions:
     new_tools[my_tool.name] = my_tool
 for my_tool in additional_actions:
     new_tools[my_tool.name] = my_tool
-# Add the async tools
-for name, func in tools.items():
-    new_tools[name] = func

@@ -5,6 +5,7 @@ from app.chatbot.chatbot_models import MemoryEntry, PaginatedMemoryResult
 from app.chatbot.workflows.memories.memory_entities import MemoryEntryEntity
 from app.common.models import MemoryManagementConfig
 from app.common.repositories import BaseRepository
+from app.conversation.messages.message_entities import MessageEntity
 
 
 class MemoryManager(BaseRepository):
@@ -94,4 +95,44 @@ class MemoryManager(BaseRepository):
         self.session.commit()
 
         results = [entity.to_domain() for entity in entities]
+        return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
+
+    async def search_conversation_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
+        from app.chatbot.chatbot_models import MemoryEntry, MemoryType
+        from app.common.models import MemoryManagementConfig
+        from sqlalchemy import func
+
+        page_size = MemoryManagementConfig.MEMORY_SEARCH_PAGE_SIZE
+        offset = (page - 1) * page_size
+
+        # Get total count
+        count_stmt = select(func.count(MessageEntity.id)).where(MessageEntity.sender_id == user_id)
+        total_count = self.session.scalar(count_stmt) or 0
+        total_pages = (total_count + page_size - 1) // page_size
+
+        distance_expr = MessageEntity.message_embedding.l2_distance(embeddings)
+        similarity_expr = (1 / (1 + distance_expr)).label("confidence")
+
+        # Get paginated results
+        stmt = (
+            select(MessageEntity, similarity_expr)
+            .where(MessageEntity.sender_id == user_id)
+            .order_by(MessageEntity.message_embedding.l2_distance(embeddings), MessageEntity.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+
+        rows = self.session.scalars(stmt).all()
+        results = [
+            MemoryEntry(
+                id=e.id,
+                user_id=user_id,
+                memory_type=MemoryType.RECALL,
+                content=e.message,
+                embedding=e.message_embedding,
+                created_at=e.created_at,
+            )
+            for e in rows
+        ]
+
         return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)

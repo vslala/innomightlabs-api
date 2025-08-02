@@ -9,8 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.models import MemoryManagementConfig, MemoryType, Role, StreamStep
 from app.conversation.messages.message_models import AgentVersion
-
-
 from app.user import User
 
 
@@ -135,6 +133,7 @@ class AgentState(BaseModel):
     current_conversation_history_page: int = Field(default=1)
     current_archival_memory_page: int = Field(default=1)
     total_archival_memory_pages: int = Field(default=1)
+    recall_paginated_result: PaginatedMemoryResult | None = Field(default=None)
 
     # Multi-step reasoning fields
     phase: Phase = Field(default=Phase.NEED_FINAL)
@@ -146,6 +145,9 @@ class AgentState(BaseModel):
 
     # Error handling
     retry: int = Field(default=0)
+
+    # Tool call guard
+    last_tool_call: tuple[str, str] | None = Field(default=None)  # (tool_name, params_hash)
 
     stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
 
@@ -166,11 +168,14 @@ Current Page: {self.current_archival_memory_page}\n
 
     def build_recall_memory(self) -> str:
         """Build the recall memory from the state."""
-        if not self.recall_memory:
+        if not self.recall_paginated_result or not self.recall_paginated_result.results:
             return ""
 
-        recall_memory = ""
-        for entry in self.recall_memory:
+        recall_memory = f"""
+Total Pages : {self.recall_paginated_result.total_pages}
+Current Page: {self.recall_paginated_result.page}\n        
+"""
+        for entry in self.recall_paginated_result.results:
             recall_memory += entry.serialize()
         return recall_memory
 
@@ -207,7 +212,7 @@ Current Page: {self.current_archival_memory_page}\n
 
         # Calculate current memory usage in characters
         archival_chars = sum(len(entry.content) for entry in self.archival_memory)
-        recall_chars = sum(len(entry.content) for entry in self.recall_memory)
+        recall_chars = sum(len(entry.content) for entry in self.recall_paginated_result.results) if self.recall_paginated_result else 0
 
         archival_usage = archival_chars / MemoryManagementConfig.ARCHIVAL_MEMORY_LIMIT
         recall_usage = recall_chars / MemoryManagementConfig.RECALL_MEMORY_LIMIT

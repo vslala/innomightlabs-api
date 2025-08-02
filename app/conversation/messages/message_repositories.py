@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.conversation.messages import Message
 from app.conversation.messages.message_entities import MessageEntity
+from app.chatbot.chatbot_models import PaginatedMemoryResult
 
 
 class MessageRepository(BaseRepository):
@@ -113,6 +114,43 @@ class MessageRepository(BaseRepository):
             )
             for e in entities
         ]
+
+    async def search_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
+        from app.chatbot.chatbot_models import MemoryEntry, MemoryType
+        from app.common.models import MemoryManagementConfig
+        from sqlalchemy import func
+
+        page_size = MemoryManagementConfig.MEMORY_SEARCH_PAGE_SIZE
+        offset = (page - 1) * page_size
+
+        # Get total count
+        count_stmt = select(func.count(MessageEntity.id)).where(MessageEntity.sender_id == user_id)
+        total_count = self.session.scalar(count_stmt) or 0
+        total_pages = (total_count + page_size - 1) // page_size
+
+        # Get paginated results
+        stmt = (
+            select(MessageEntity)
+            .where(MessageEntity.sender_id == user_id)
+            .order_by(MessageEntity.message_embedding.l2_distance(embeddings), MessageEntity.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+
+        entities = self.session.scalars(stmt).all()
+        results = [
+            MemoryEntry(
+                id=e.id,
+                user_id=user_id,
+                memory_type=MemoryType.RECALL,
+                content=e.message,
+                embedding=e.message_embedding,
+                created_at=e.created_at,
+            )
+            for e in entities
+        ]
+
+        return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
 
     async def delete_message(self, message_id: UUID) -> None:
         """

@@ -44,7 +44,7 @@ def test_start_conversation(
 
     # 3) Hit the endpoint
     response = client.post(
-        "/api/v1/conversation",
+        "/api/v1/conversations",
         headers={
             "X-Forwarded-User": fake_user.username,
         },

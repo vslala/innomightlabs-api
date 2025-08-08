@@ -2,7 +2,7 @@ import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Deque
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,15 +35,28 @@ class MemoryEntry(BaseModel):
         """Delete the memory block"""
         self.content = ""
 
-    def serialize(self) -> str:
-        """Serialize the memory block to a dictionary"""
+    def serialize(self) -> dict[str, Any]:
+        """Serialize the memory block with usage statistics and alerts"""
         content = self.content
         token_limit = self.memory_type.token_limit
-        tokens = len(content) / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
-        if tokens > token_limit:
-            content = self.content[-token_limit:]
-        header = f"\n[Memory Block: {self.memory_type.value} | id={self.id} | max_tokens={token_limit}]\n"
-        return header + content
+        char_limit = token_limit * MemoryManagementConfig.AVERAGE_TOKEN_SIZE
+        current_chars = len(content)
+        current_tokens = current_chars / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
+
+        usage_pct = (current_tokens / token_limit * 100) if token_limit > 0 else 0
+
+        if current_tokens > token_limit:
+            content = content[-char_limit:]
+
+        # Alert if usage >= 70%
+        alert = " ⚠️ CLEAN NEEDED" if usage_pct >= 70 else ""
+
+        header = f"\n[{self.memory_type.value.upper()} | {current_chars} chars | {current_tokens:.0f}/{token_limit} tokens ({usage_pct:.1f}%){alert}]\n"
+        return {
+            "header": header,
+            "id": str(self.id),
+            "content": content,
+        }
 
 
 class PaginatedMemoryResult(BaseModel):
@@ -74,6 +87,8 @@ class Action(BaseModel):
     name: str = Field(default="", description="Name of the action to choose")
     description: str = Field(default="", description="Explanation of what this action do")
     params: dict[str, Any] = Field(default={}, description="Input parameters for the action (if any)")
+    request_heartbeat: bool = Field(default=False, description="Whether to request a heartbeat after this action")
+    reason_for_heartbeat: str = Field(default="", description="Reason for requesting heartbeat")
 
 
 class AgentThought(BaseModel):
@@ -104,10 +119,14 @@ class AgentMessage(BaseModel):
         role_cap = self.role.value.capitalize()
         return f"[{role_cap} - ({ts_str})] {self.message}"
 
+    def __str__(self) -> str:
+        return self.model_dump_json()
+
 
 class Phase(Enum):
     NEED_FINAL = "need_final"
     NEED_TOOL = "need_tool"
+    ERROR = "error"
 
 
 class AgentState(BaseModel):
@@ -125,19 +144,13 @@ class AgentState(BaseModel):
 
     # Memory Segments
     system_prompt: str = Field(default="")
-
-    archival_memory: Deque[MemoryEntry] = Field(default=deque([]))
-    recall_memory: Deque[MemoryEntry] = Field(default=deque([]))
-
-    # Pagination summary
-    current_conversation_history_page: int = Field(default=1)
-    current_archival_memory_page: int = Field(default=1)
-    total_archival_memory_pages: int = Field(default=1)
     recall_paginated_result: PaginatedMemoryResult | None = Field(default=None)
+    memory_blocks: dict[MemoryType, MemoryEntry] = Field(default={})
 
     # Multi-step reasoning fields
     phase: Phase = Field(default=Phase.NEED_FINAL)
     thought: AgentThought | None = Field(default=None)
+    thoughts: deque[AgentThought] = Field(default=deque([]))
     observations: list[ActionResult] = Field(default=[])
 
     # Quality assurance fields
@@ -151,45 +164,14 @@ class AgentState(BaseModel):
 
     stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
 
-    def build_archival_memory(self) -> str:
-        """Build the archival memory from the state."""
-        if not self.archival_memory:
-            return ""
-
-        archival_memory = f"""
-Total Pages : {self.total_archival_memory_pages}
-Current Page: {self.current_archival_memory_page}\n        
-"""
-
-        self.archival_memory.reverse()
-        for entry in self.archival_memory:
-            archival_memory += entry.serialize()
-        return archival_memory
-
-    def build_recall_memory(self) -> str:
-        """Build the recall memory from the state."""
-        if not self.recall_paginated_result or not self.recall_paginated_result.results:
-            return ""
-
-        recall_memory = f"""
-Total Pages : {self.recall_paginated_result.total_pages}
-Current Page: {self.recall_paginated_result.page}\n        
-"""
-        for entry in self.recall_paginated_result.results:
-            recall_memory += entry.serialize()
-        return recall_memory
-
-    def build_conversation_history(self) -> str:
+    def build_conversation_history(self) -> list[str]:
         """Build the conversation history from the state."""
         page_size = MemoryManagementConfig.CONVERSATION_PAGE_SIZE
 
         curr_messages = self.messages[-page_size:]
         curr_messages.sort(key=lambda msg: msg.timestamp)
-        messages = "\n".join(msg.get_formatted_prompt() for msg in curr_messages)
-        return f"""
-## CONVERSATION HISTORY
-{messages}
-"""
+        messages = [msg.model_dump_json() for msg in curr_messages]
+        return messages
 
     def build_observations(self) -> str:
         """Build the observation from the state."""
@@ -206,30 +188,34 @@ Current Page: {self.recall_paginated_result.page}\n
         paths = "\n- ".join(self.filepaths)
         return f"### TEMP FILES\n- {paths}"
 
-    def get_memory_overflow_alert(self) -> str:
-        """Check for memory overflow and return alert if needed."""
-        alerts = []
+    def load_and_build_memory_blocks(self) -> str:
+        """Build display from in-memory blocks with usage stats and alerts"""
+        if not self.memory_blocks:
+            return "No memory blocks available."
 
-        # Calculate current memory usage in characters
-        archival_chars = sum(len(entry.content) for entry in self.archival_memory)
-        recall_chars = sum(len(entry.content) for entry in self.recall_paginated_result.results) if self.recall_paginated_result else 0
+        blocks_display = []
+        for memory_type, entry in self.memory_blocks.items():
+            blocks_display.append(entry.serialize())
 
-        archival_usage = archival_chars / MemoryManagementConfig.ARCHIVAL_MEMORY_LIMIT
-        recall_usage = recall_chars / MemoryManagementConfig.RECALL_MEMORY_LIMIT
+        return "\n".join(blocks_display)
 
-        if archival_usage >= MemoryManagementConfig.MEMORY_OVERFLOW_THRESHOLD:
-            alerts.append(
-                f"⚠️ ARCHIVAL MEMORY OVERFLOW: {archival_chars}/"
-                f"{MemoryManagementConfig.ARCHIVAL_MEMORY_LIMIT} chars ({archival_usage:.0%}) - "
-                f"Consider using archival_memory_evict to remove old memories"
-            )
+    def build_conversation_context(self) -> dict[str, Any]:
+        """Build conversation context with pagination stats"""
+        if not self.recall_paginated_result or not self.recall_paginated_result.results:
+            return {}
 
-        if recall_usage >= MemoryManagementConfig.MEMORY_OVERFLOW_THRESHOLD:
-            alerts.append(
-                f"⚠️ RECALL MEMORY OVERFLOW: {recall_chars}/{MemoryManagementConfig.RECALL_MEMORY_LIMIT} chars ({recall_usage:.0%}) - Consider evicting old recall memories"
-            )
+        stats = "# Recalled Conversation\n"
+        stats += f"[Conversation Search: Page {self.recall_paginated_result.page}/{self.recall_paginated_result.total_pages} |\
+            {len(self.recall_paginated_result.results)} results |\
+                Total: {self.recall_paginated_result.total_count}]"
 
-        return "\n".join(alerts) if alerts else ""
+        context_display = {"stats": stats, "memory": []}
+        context = []
+        for entry in self.recall_paginated_result.results:
+            context.append(entry.serialize())
+
+        context_display.update({"memory": context})
+        return context_display
 
     def build_prompt(self, prompt: str) -> str:
         """Build the prompt from the state."""

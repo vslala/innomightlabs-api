@@ -1,5 +1,7 @@
+from collections import deque
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+import json
 from loguru import logger
 import re
 
@@ -8,10 +10,6 @@ from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import Action, ActionResult, AgentMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.workflows.prompts.system.intuitive_knowledge import INTUITIVE_KNOWLEDGE
 from app.common.models import Role
-
-
-# Only match the FIRST JSON block to prevent infinite loops
-JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
 def write_to_file(filepath: str, content: str) -> None:
@@ -24,22 +22,6 @@ def write_to_file(filepath: str, content: str) -> None:
     with open(filepath, "w") as f:
         f.write(content)
     logger.info(f"Content written to {filepath}")
-
-
-def extract_json_block(text: str) -> str:
-    """
-    Extracts ONLY the FIRST JSON block and logs if multiple blocks exist.
-    This aggressively prevents infinite loops.
-    """
-    matches = JSON_BLOCK_RE.findall(text)
-    if not matches:
-        raise ValueError("No JSON block found in the response.")
-
-    if len(matches) > 1:
-        logger.warning(f"INFINITE LOOP PREVENTION: Found {len(matches)} JSON blocks, using only the first one")
-
-    json_content = matches[0].strip()
-    return json_content
 
 
 def extract_tag_content(text: str, tag: str) -> list[str]:
@@ -81,58 +63,6 @@ class KrishnaAdvanceWorkflowHelper:
         last_tool, last_hash = state.last_tool_call
         return current_tool == last_tool and current_hash == last_hash
 
-    async def router(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
-        """
-        Execute the actions in the plan.
-        This method processes each action in the plan and executes it.
-        """
-        import app.chatbot.workflows.helpers.tools as Tools
-        import hashlib
-        import json
-
-        logger.info("\n\nExecuting Actions...\n\n")
-        if not state.thought:
-            raise ValueError("No thought provided")
-
-        # Guard against duplicate tool calls
-        if self._check_duplicate_tool_call(state):
-            logger.warning(f"Duplicate tool call detected: {state.thought.action.name}")
-            result = ActionResult(
-                thought="Duplicate tool call detected", action="guard", result="Skipped duplicate tool call - same tool with identical parameters already executed"
-            )
-            state.observations.append(result)
-            state.thought = None
-            yield state
-            return
-
-        selected_tool_name = state.thought.action.name
-        if selected_tool_name not in Tools.new_tools:
-            logger.error(f"Unknown tool: {selected_tool_name}")
-            raise ValueError(f"Unknown tool selected by the assistant: {selected_tool_name}")
-
-        selected_tool = Tools.new_tools[selected_tool_name]
-        input_params = state.thought.action.params
-
-        # Update last tool call tracking
-        params_hash = hashlib.md5(json.dumps(input_params, sort_keys=True).encode()).hexdigest()
-        state.last_tool_call = (selected_tool_name, params_hash)
-
-        # Handle LangChain tools vs custom async functions differently
-        if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
-            # LangChain tool - create proper input object with thought from state
-            tool_params = {"thought": state.thought.thought, **input_params}
-            tool_input = selected_tool.args_schema(**tool_params)
-            # LangChain tools expect state and input as separate arguments to the underlying function
-            result = await selected_tool.coroutine(state, tool_input)
-        else:
-            # Custom async function
-            result = await selected_tool(state)
-
-        state.observations.append(result)
-        logger.info(f"Got the observations: {result}")
-        state.thought = None
-        yield state
-
     async def thinker(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
         plan_of_action = ""
         async for chunk in self.chatbot.stream_response(prompt=state.prompt):
@@ -143,114 +73,124 @@ class KrishnaAdvanceWorkflowHelper:
 
     def prompt_builder(self, state: AgentState) -> AgentState:
         """
-        Build the prompt for the LLM with circuit breaker
+        Build the prompt for the LLM with MemoryManagerV2 integration
         """
-        # Check for memory overflow alerts
-        memory_alert = state.get_memory_overflow_alert()
-        memory_alert_text = f"\n{memory_alert}\n" if memory_alert else ""
+        prompt = {
+            "system_prompt": INTUITIVE_KNOWLEDGE,
+            "current_time": datetime.now(timezone.utc).isoformat(),
+            "archival_memory": state.memory_blocks,
+            "recalled_memory": state.build_conversation_context(),
+            "conversation_history": state.build_conversation_history(),
+            "heartbeats_used": state.epochs,
+            "current_user_query": state.user_message,
+        }
 
-        prompt = f"""
-{INTUITIVE_KNOWLEDGE}
-
-{memory_alert_text}
-
-Archival Memory Blocks:
-{state.build_archival_memory()}
-
-Recalled Memory Blocks:
-{state.build_recall_memory()}
-
-Recent Conversation History:
-{state.build_conversation_history()}
-{state.build_observations()}
-
-Current User Query:
-[user - ({datetime.now(timezone.utc).isoformat()})] - {state.user_message}
-
-"""
-        state.prompt = state.build_prompt(prompt=prompt)
+        state.prompt = json.dumps(prompt, indent=2)
         logger.info(f"Prompt built for epoch {state.epochs}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
         write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
         logger.debug(f"Prompt:\n{state.prompt}")
         return state
 
-    def validate_response(self, state: AgentState) -> AgentState:
+    def parse_actions(self, state: AgentState) -> AgentState:
         import yaml
 
+        state.epochs += 1
         logger.info(f"Validating Response\n\n{state.llm_response}...")
         plan = state.llm_response
 
         try:
             # ——— 1) inner_monologue handling unchanged ———
-            thoughts = ""
+            thoughts = deque([])
             for monologue in extract_tag_content(plan, "inner_monologue") or []:
                 text = monologue.strip()
-                thoughts += text + "\n"
                 state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
+                thoughts.append(text)
+                # state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
 
-            # ——— 2) extract raw YAML block ———
-            snippets = extract_tag_content(plan, "action")
-            if not snippets:
-                state.phase = Phase.NEED_TOOL
-                return state
-            raw_action = snippets[0]
+            for idx, action in enumerate(extract_tag_content(plan, "action")) or []:
+                action = action.strip()
+                action = yaml.safe_load(action)
+                action = Action.model_validate(action)
+                state.thoughts.append(AgentThought(thought=thoughts[idx], action=action))
 
-            # ——— 3) parse YAML ———
-            action_dict = yaml.safe_load(raw_action)
-
-            # ——— 4) validate & assign ———
-            agent_action = Action.model_validate(action_dict)
-            state.thought = AgentThought(thought=thoughts, action=agent_action)
-            state.phase = Phase.NEED_FINAL if agent_action.name == "send_message" else Phase.NEED_TOOL
-            state.retry = 0
             write_to_file(f"/tmp/prompts/response_{state.epochs}.md", plan)
 
         except Exception as e:
-            # ——— existing retry/fallback logic ———
             state.retry += 1
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
             state.messages.append(AgentMessage(message=f"Validation failed while parsing your yaml response: {e}", role=Role.SYSTEM))
-
-            if state.retry >= 2:
-                logger.warning("Forcing final response after multiple validation failures")
-                state.thought = AgentThought(
-                    thought="Validation failed multiple times, providing fallback response",
-                    action=Action(
-                        name="send_message",
-                        description="Sends the message to the user",
-                        params={"message": ("I apologize, but I'm having trouble processing your request. Please try rephrasing your question.")},
-                    ),
-                )
-                state.phase = Phase.NEED_FINAL
-            else:
-                state.thought = None
-                state.phase = Phase.NEED_TOOL
-
-            return state
+            raise ValueError(f"Validation failed while parsing your yaml response: {e}") from e
 
         return state
 
-    async def final_response(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
-        """
-        Generate the final response based on the plan and user message.
-        """
-        if not state.thought:
-            raise ValueError("No thought provided for final_response")
+    async def execute_actions(self, state: AgentState) -> AgentState:
+        """Execute the actions in the plan"""
+        import app.chatbot.workflows.helpers.tools as Tools
+        import hashlib
+        import json
 
-        # Handle send_message action
-        if state.thought.action.name == "send_message":
-            final_response = state.thought.action.params.get("message", "")
-        else:
-            final_response = state.thought.action.params.get("text", "")
+        logger.info("\n\nExecuting Actions...\n\n")
 
-        if not final_response:
-            raise ValueError(f"No message content found in {state.thought.action.name} action params")
+        while state.thoughts:
+            thought = state.thoughts.popleft()
+            action = thought.action
+            selected_tool_name = action.name
+            if selected_tool_name not in Tools.new_tools:
+                logger.error(f"Unknown tool: {selected_tool_name}")
+                state.phase = Phase.ERROR
+                return state
 
-        await state.stream_queue.put(StreamChunk(content=final_response, step=StreamStep.FINAL_RESPONSE, step_title="Finalizing Response"))
+            selected_tool = Tools.new_tools[selected_tool_name]
+            input_params = action.params
 
-        state.llm_response = final_response
-        yield state
+            # Update last tool call tracking
+            params_hash = hashlib.md5(json.dumps(input_params, sort_keys=True).encode()).hexdigest()
+            state.last_tool_call = (selected_tool_name, params_hash)
+
+            # Handle LangChain tools vs custom async functions differently
+            if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
+                # LangChain tool - create proper input object with thought from state
+                tool_params = {"thought": thought, **input_params}
+                tool_input = selected_tool.args_schema(**tool_params)
+                # LangChain tools expect state and input as separate arguments to the underlying function
+                response = await selected_tool.coroutine(state, tool_input)
+                state.observations.append(response)
+                if selected_tool_name == "send_message":
+                    state.phase = Phase.NEED_FINAL
+                    state.observations = []
+                    state.epochs = 0
+                    break
+                elif action.request_heartbeat:
+                    action_result = ActionResult.model_validate(response)
+                    state.messages.append(AgentMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
+                    state.messages.append(AgentMessage(message=action_result.result, role=Role.USER))
+                    state.phase = Phase.NEED_TOOL
+                    break
+                else:
+                    state.phase = Phase.ERROR
+                    break
+            else:
+                # Custom async function
+                response = await selected_tool(state)
+                state.observations.append(response)
+                state.phase = Phase.NEED_FINAL
+
+        logger.debug(f"NEXT PHASE: {state.phase}")
+        return state
+
+    async def final_response(self, state: AgentState) -> AgentState:
+        """Generate the final response based on the plan and user message"""
+        prompt = {
+            "system_prompt": "You are Krishna! Answer user's query in the best and concise and friendly way possible.",
+            "conversation_history": state.build_conversation_history(),
+            "current_user_query": state.user_message,
+        }
+
+        async for chunk in self.chatbot.stream_response(prompt=json.dumps(prompt, indent=2)):
+            await state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE, step_title="Sending response..."))
+
+        return state
 
     def _is_duplicate_action(self, state: AgentState, thought: AgentThought) -> bool:
         """Check if this action was already performed successfully"""

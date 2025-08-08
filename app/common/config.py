@@ -7,6 +7,7 @@ from app.chatbot.chatbot_services import ChatbotService
 from app.chatbot.workflows.krishna_advance import KrishnaAdvanceWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
 from app.chatbot.workflows.memories.memory_manager import MemoryManager
+from app.chatbot.workflows.memories.memory_manager_v2 import MemoryManagerV2
 from app.common.db_connect import SessionLocal
 from app.common.repositories import TransactionManager
 from app.common.vector_embedders import BaseVectorEmbedder, LangChainTitanEmbedder
@@ -77,6 +78,10 @@ class RepositoryFactory:
     @staticmethod
     def get_memory_manager_repository() -> MemoryManager:
         return MemoryManager(session=SessionFactory.get_session())
+
+    @staticmethod
+    def get_memory_manager_v2_repository() -> MemoryManagerV2:
+        return MemoryManagerV2(session=SessionFactory.get_session())
 
 
 class ChatbotFactory:

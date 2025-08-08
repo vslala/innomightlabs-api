@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 import wikipedia
 
 from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, MemoryType, StreamChunk
+from app.chatbot.workflows.memories.memory_tools import memory_tools_v2
 from app.common.models import StreamStep
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
@@ -317,7 +318,7 @@ async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -
     return result
 
 
-memory_actions: list[BaseTool] = [archival_memory_search, archival_memory_insert, archival_memory_update, archival_memory_evict, conversation_search]
+memory_actions: list[BaseTool] = memory_tools_v2 + [conversation_search]
 additional_actions: list[BaseTool] = [send_message, python_code_runner]
 available_actions = memory_actions + additional_actions
 

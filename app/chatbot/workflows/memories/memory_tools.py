@@ -1,10 +1,7 @@
-from uuid import UUID
 from pydantic import BaseModel, Field
 from langchain.tools import tool, BaseTool
-from typing import Optional
 
-from app.chatbot.chatbot_models import ActionResult, AgentState, Phase
-from app.chatbot.workflows.memories.memory_manager_v2 import MemoryManagerV2
+from app.chatbot.chatbot_models import ActionResult, AgentState
 from app.common.models import MemoryType
 
 # Initialize lazily to avoid circular imports
@@ -31,8 +28,7 @@ def get_embedder():
 
 
 class BaseParamsModel(BaseModel):
-    request_heartbeat: Optional[bool] = Field(default=False)
-    reason_for_heartbeat: Optional[str] = Field(default=None)
+    pass
 
 
 class MemoryBlockUpsertParams(BaseParamsModel):
@@ -50,13 +46,8 @@ class MemoryBlockUpsertParams(BaseParamsModel):
 async def memory_block_upsert(state: AgentState, input: MemoryBlockUpsertParams) -> ActionResult:
     memory_type = MemoryType(input.memory_type.lower())
     embedding = get_embedder().embed_single_text(input.content)
-
-    memory_entry = get_memory_manager_v2().upsert_memory_block(user_id=state.user.id, memory_type=memory_type, content=input.content, embedding=embedding)
-
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
-
+    get_memory_manager_v2().upsert_memory_block(user_id=state.user.id, memory_type=memory_type, content=input.content, embedding=embedding)
+    state.memory_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
     return ActionResult(thought="Upserted memory block", action="memory_block_upsert", result=f"Memory block '{memory_type.value}' updated with content: {input.content[:100]}...")
 
 
@@ -80,10 +71,7 @@ async def memory_block_replace(state: AgentState, input: MemoryBlockReplaceParam
 
     if not updated_entry:
         return ActionResult(thought="Memory block not found", action="memory_block_replace", result=f"No memory block found for type '{memory_type.value}'")
-
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
+    state.memory_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
 
     return ActionResult(
         thought="Replaced text in memory block", action="memory_block_replace", result=f"Replaced '{input.old_text}' with '{input.new_text}' in {memory_type.value} block"
@@ -108,11 +96,6 @@ async def memory_block_read(state: AgentState, input: MemoryBlockReadParams) -> 
 
     if not memory_entry:
         return ActionResult(thought="Memory block not found", action="memory_block_read", result=f"No memory block found for type '{memory_type.value}'")
-
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
-
     return ActionResult(thought="Retrieved memory block", action="memory_block_read", result=f"Memory block '{memory_type.value}': {memory_entry.content}")
 
 
@@ -134,10 +117,8 @@ async def memory_block_append(state: AgentState, input: MemoryBlockAppendParams)
 
     memory_entry = get_memory_manager_v2().append_to_memory_block(user_id=state.user.id, memory_type=memory_type, text=input.text, separator=input.separator)
 
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
-
+    # Update state memory blocks
+    state.memory_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
     return ActionResult(
         thought="Appended to memory block", action="memory_block_append", result=f"Appended text to {memory_type.value} block. New size: {len(memory_entry.content)} chars"
     )
@@ -162,10 +143,8 @@ async def memory_block_delete(state: AgentState, input: MemoryBlockDeleteParams)
     if not deleted:
         return ActionResult(thought="Memory block not found", action="memory_block_delete", result=f"No memory block found for type '{memory_type.value}' to delete")
 
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
-
+    # Update state memory blocks
+    state.memory_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
     return ActionResult(thought="Deleted memory block", action="memory_block_delete", result=f"Deleted memory block for type '{memory_type.value}'")
 
 
@@ -179,6 +158,9 @@ async def memory_block_delete(state: AgentState, input: MemoryBlockDeleteParams)
 async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> ActionResult:
     all_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
 
+    # Update state memory blocks
+    state.memory_blocks = all_blocks
+
     if not all_blocks:
         return ActionResult(thought="No memory blocks found", action="memory_blocks_list_all", result="No memory blocks found for user")
 
@@ -186,12 +168,7 @@ async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> A
     for memory_type, entry in all_blocks.items():
         size = len(entry.content)
         block_summary.append(f"- {memory_type.value}: {size} chars")
-
-    # Handle heartbeat request
-    if input.request_heartbeat:
-        state.phase = Phase.NEED_TOOL
-
-    return ActionResult(thought="Listed all memory blocks", action="memory_blocks_list_all", result=f"Memory blocks:\n" + "\n".join(block_summary))
+    return ActionResult(thought="Listed all memory blocks", action="memory_blocks_list_all", result="Memory blocks:\n" + "\n".join(block_summary))
 
 
 # Export memory tools for LLM
@@ -199,7 +176,7 @@ memory_tools_v2: list[BaseTool] = [
     memory_block_upsert,
     memory_block_replace,
     memory_block_read,
-    memory_block_append,
-    memory_block_delete,
-    memory_blocks_list_all,
+    # memory_block_append,
+    # memory_block_delete,
+    # memory_blocks_list_all,
 ]

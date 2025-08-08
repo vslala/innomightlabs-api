@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import wikipedia
 
 from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, MemoryType, StreamChunk
-from app.chatbot.workflows.memories.memory_tools import memory_tools_v2
+from app.chatbot.workflows.memories.memory_tools import BaseParamsModel, memory_tools_v2
 from app.common.models import StreamStep
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
@@ -230,7 +230,7 @@ async def send_message(state: AgentState, input: SendMessageParams) -> ActionRes
     return ActionResult(thought="", action="send_message", result="Message sent successfully!")
 
 
-class ConversationSearchParams(BaseModel):
+class ConversationSearchParams(BaseParamsModel):
     """Recalls memory based on the provided query"""
 
     query: str
@@ -240,7 +240,9 @@ class ConversationSearchParams(BaseModel):
 @tool(
     "conversation_search",
     description="""Loads older conversation into working context as "recall" memory blocks
-        - If it returns [], _you must not call conversation_search again for the same query_.  
+        - Use `page` param to scroll through older conversation if you don't find something in the given page
+        - Do not go past the last page
+        - If it returns [], _you must not call `conversation_search` again for the same query_.  
         - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
         """,
     args_schema=ConversationSearchParams,
@@ -261,11 +263,6 @@ async def conversation_search(state: AgentState, input: ConversationSearchParams
     if not paginated_result.results:
         return ActionResult(thought="", action="conversation_search", result="[]")
 
-    # Check for overflow before adding entries
-    if paginated_result.results:
-        new_content_size = sum(len(entry.content) for entry in paginated_result.results)
-        _manage_memory_overflow(state, MemoryType.RECALL, new_content_size)
-
     # Only add to state memory, don't persist to database
     state.recall_paginated_result = paginated_result
 
@@ -274,7 +271,7 @@ async def conversation_search(state: AgentState, input: ConversationSearchParams
     return ActionResult(thought="", action="conversation_search", result=result_msg)
 
 
-class PythonCodeRunnerParams(BaseModel):
+class PythonCodeRunnerParams(BaseParamsModel):
     """Runs python code and returns the output"""
 
     thought: str

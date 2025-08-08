@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, delete
 from app.chatbot.chatbot_models import MemoryEntry
 from app.chatbot.workflows.memories.memory_entities import MemoryEntryEntity
-from app.common.models import MemoryType, MemoryManagementConfig
+from app.common.models import MemoryType
 from app.common.repositories import BaseRepository
 
 
@@ -15,11 +15,6 @@ class MemoryManagerV2(BaseRepository):
         # Check if block exists
         stmt = select(MemoryEntryEntity).where(MemoryEntryEntity.user_id == user_id, MemoryEntryEntity.memory_type == memory_type.value)
         existing = self.session.scalar(stmt)
-
-        # Truncate content if exceeds token limit
-        token_limit_chars = memory_type.token_limit * MemoryManagementConfig.AVERAGE_TOKEN_SIZE
-        if len(content) > token_limit_chars:
-            content = content[-token_limit_chars:]
 
         if existing:
             # Update existing block
@@ -47,11 +42,6 @@ class MemoryManagerV2(BaseRepository):
 
         # Perform replacement
         entity.content = entity.content.replace(old_text, new_text)
-
-        # Ensure content doesn't exceed token limit
-        token_limit_chars = memory_type.token_limit * MemoryManagementConfig.AVERAGE_TOKEN_SIZE
-        if len(entity.content) > token_limit_chars:
-            entity.content = entity.content[-token_limit_chars:]
 
         self.session.commit()
         return entity.to_domain()

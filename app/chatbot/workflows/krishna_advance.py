@@ -22,6 +22,17 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         super().__init__(state, chatbot)
         # state.messages.append(AgentMessage(message=state.user_message, role=Role.USER))
 
+    def _router(self, state: AgentState) -> str:
+        """
+        Route the workflow based on the current state.
+        """
+        if state.phase == Phase.NEED_TOOL:
+            return "prompt_builder"
+        elif state.phase == Phase.NEED_FINAL:
+            return "__END__"
+        else:
+            return "error_handler"
+
     async def run(self) -> AsyncGenerator[StreamChunk, None]:
         """
         Run the Krishna workflow and yield stream chunks.
@@ -35,33 +46,17 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         # 1) prompt_builder: ask LLM to think or finish
         graph.add_node("prompt_builder", helper.prompt_builder)
         graph.add_node("thinker", helper.thinker)
-        graph.add_node("validate_response", helper.validate_response)
-        # 2) router: only if LLM asked for a tool
-        graph.add_node("router", helper.router)
-        # 3) final_response: emit the answer
-        graph.add_node("final_response", helper.final_response)
+        graph.add_node("parse_actions", helper.parse_actions)
+        graph.add_node("execute_actions", helper.execute_actions)
+        graph.add_node("router", self._router)
+        graph.add_node("error_handler", helper.final_response)
 
         # Start → prompt_builder
         graph.add_edge(START, "prompt_builder")
         graph.add_edge("prompt_builder", "thinker")
-        graph.add_edge("thinker", "validate_response")
-
-        def route_after_validation(state: AgentState) -> str:
-            if state.phase == Phase.NEED_FINAL:
-                return "final_response"
-            elif state.phase == Phase.NEED_TOOL and state.thought:
-                return "router"
-            else:
-                # Retry thinking if no thought but need tool
-                return "thinker"
-
-        graph.add_conditional_edges("validate_response", route_after_validation, {"router": "router", "final_response": "final_response", "thinker": "thinker"}, END)
-
-        # After running the tool, always go back into prompt_builder
-        graph.add_edge("router", "prompt_builder")
-
-        # final_response → END
-        graph.add_edge("final_response", END)
+        graph.add_edge("thinker", "parse_actions")
+        graph.add_edge("parse_actions", "execute_actions")
+        graph.add_conditional_edges("execute_actions", self._router, {"prompt_builder": "prompt_builder", "error_handler": "error_handler", "__END__": END}, END)
 
         app = graph.compile()
 

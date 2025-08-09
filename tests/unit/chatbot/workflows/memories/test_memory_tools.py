@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from uuid import uuid4
-from app.chatbot.workflows.memories.memory_tools import (
+from app.chatbot.workflows.helpers.tools.memory_tools import (
     memory_block_upsert,
     memory_block_replace,
     memory_block_read,

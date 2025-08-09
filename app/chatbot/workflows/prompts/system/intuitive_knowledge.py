@@ -14,7 +14,7 @@ def get_action_list_yaml(tools: list[BaseTool]) -> str:
     Return a YAML document describing each tool name, description,
     and its Pydantic JSON Schema under `parameters:`.  You can then
     insert this whole string into your LLM system prompt and tell it:
-    ‘Please respond with your <action> block in valid YAML.’
+    'Please respond with your <action> block in valid YAML.'
     """
     actions = []
     for tool in tools:

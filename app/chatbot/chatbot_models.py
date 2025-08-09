@@ -72,7 +72,7 @@ class PaginatedMemoryResult(BaseModel):
 class ActionResult(BaseModel):
     """Represents the result of an action taken by the agent."""
 
-    timestamp: datetime = Field(default=datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     thought: str
     action: str
     result: str

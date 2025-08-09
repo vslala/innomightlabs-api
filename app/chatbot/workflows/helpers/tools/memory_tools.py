@@ -6,6 +6,7 @@ from app.common.models import MemoryType
 
 # Initialize lazily to avoid circular imports
 _memory_manager_v2 = None
+_message_repository = None
 _embedder = None
 
 
@@ -16,6 +17,15 @@ def get_memory_manager_v2():
 
         _memory_manager_v2 = RepositoryFactory.get_memory_manager_v2_repository()
     return _memory_manager_v2
+
+
+def get_message_repository():
+    global _message_repository
+    if _message_repository is None:
+        from app.common.config import RepositoryFactory
+
+        _message_repository = RepositoryFactory.get_message_repository()
+    return _message_repository
 
 
 def get_embedder():
@@ -171,11 +181,50 @@ async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> A
     return ActionResult(thought="Listed all memory blocks", action="memory_blocks_list_all", result="Memory blocks:\n" + "\n".join(block_summary))
 
 
+class ConversationSearchParams(BaseParamsModel):
+    """Recalls memory based on the provided query"""
+
+    query: str
+    page: int = Field(default=1)
+
+
+@tool(
+    "conversation_search",
+    description="""Loads older conversation into working context as "recall" memory blocks
+        - Use `page` param to scroll through older conversation if you don't find something in the given page
+        - Do not go past the last page
+        - If it returns [], _you must not call `conversation_search` again for the same query_.  
+        - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
+        """,
+    args_schema=ConversationSearchParams,
+    infer_schema=False,
+    return_direct=True,
+)
+async def conversation_search(state: AgentState, input: ConversationSearchParams) -> ActionResult:
+    """
+    Recalls memory based on the provided query with pagination support.
+    """
+    from app.chatbot.chatbot_models import PaginatedMemoryResult
+
+    embeddings = get_embedder().embed_single_text(input.query)
+    paginated_result: PaginatedMemoryResult = await get_message_repository().search_paginated_by_user_id_and_embeddings(
+        user_id=state.user.id, embeddings=embeddings, page=input.page
+    )
+
+    if not paginated_result.results:
+        return ActionResult(thought="", action="conversation_search", result="[]")
+
+    state.recall_paginated_result = paginated_result
+    result_msg = "Older conversation loaded into working context"
+    return ActionResult(thought="", action="conversation_search", result=result_msg)
+
+
 # Export memory tools for LLM
 memory_tools_v2: list[BaseTool] = [
     memory_block_upsert,
     memory_block_replace,
     memory_block_read,
+    conversation_search,
     # memory_block_append,
     # memory_block_delete,
     # memory_blocks_list_all,

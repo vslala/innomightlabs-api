@@ -14,7 +14,7 @@ from langchain.tools import tool, BaseTool
 
 from app.chatbot.chatbot_models import ActionResult, AgentState, StreamChunk
 from app.chatbot.workflows.helpers.tools.memory_tools import BaseParamsModel, memory_tools_v2
-from app.chatbot.workflows.helpers.tools import text_editor_tools
+from app.chatbot.workflows.helpers.tools import text_editor_tools, browser_tools
 from app.common.models import StreamStep
 
 _shared_ns: dict = {}
@@ -280,7 +280,7 @@ async def wikipedia_search_tool(state: AgentState) -> ActionResult:
 
 
 memory_actions: list[BaseTool] = memory_tools_v2
-additional_actions: list[BaseTool] = [send_message, python_code_runner, text_editor_tools.text_editor]
+additional_actions: list[BaseTool] = [send_message, python_code_runner, text_editor_tools.text_editor, browser_tools.download_webpage]
 available_actions = memory_actions + additional_actions
 
 

@@ -11,7 +11,7 @@ import os
 
 
 os.environ["BYPASS_TOOL_CONSENT"] = "true"
-DIR_PREFIX = "/tmp/innomightlabs/"
+DIR_PREFIX = "/tmp/innomightlabs"
 if not os.path.exists(DIR_PREFIX):
     os.makedirs(DIR_PREFIX, exist_ok=True)
 
@@ -164,7 +164,8 @@ class TextEditorInputParams(BaseModel):
     return_direct=True,
 )
 async def text_editor(state: AgentState, input: TextEditorInputParams) -> ActionResult:
-    input.path = f"{DIR_PREFIX}{input.path}"
+    if input.command in {TextEditorCommand.CREATE}:
+        input.path = f"{DIR_PREFIX}/{input.path}"
 
     output = strands_text_editor.editor(
         command=input.command.value,

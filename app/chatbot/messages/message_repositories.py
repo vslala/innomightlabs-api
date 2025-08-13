@@ -5,9 +5,13 @@ from sqlalchemy.dialects.postgresql import insert
 from app.common.repositories import BaseRepository
 from sqlalchemy.orm import Session
 
-from app.conversation.messages import Message
-from app.conversation.messages.message_entities import MessageEntity
-from app.chatbot.chatbot_models import PaginatedMemoryResult
+from app.chatbot.messages import Message
+from app.chatbot.messages.message_entities import MessageEntity
+from app.chatbot.chatbot_models import PaginatedResult, MemoryEntry
+
+from app.chatbot.chatbot_models import MemoryType
+from app.common.models import MemoryManagementConfig
+from sqlalchemy import func
 
 
 class MessageRepository(BaseRepository):
@@ -50,6 +54,23 @@ class MessageRepository(BaseRepository):
             message.updated_at = message_entity.updated_at
 
         return message
+
+    def batch_add_messages(self, user_id: UUID, messages: list[Message]) -> None:
+        self.session.add_all(
+            [
+                MessageEntity(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    sender_id=user_id,
+                    role=m.role,
+                    message=m.content,
+                    message_embedding=m.embedding,
+                    parent_message_id=m.parent_message_id,
+                )
+                for m in messages
+            ]
+        )
+        self.session.commit()
 
     def fetch_all_by_conversation_id_and_embedding(self, conversation_id: UUID, embedding: list[float], top_k: int = 10):
         stmt = (
@@ -115,11 +136,34 @@ class MessageRepository(BaseRepository):
             for e in entities
         ]
 
-    async def search_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
-        from app.chatbot.chatbot_models import MemoryEntry, MemoryType
-        from app.common.models import MemoryManagementConfig
-        from sqlalchemy import func
+    async def fetch_all_paginated_by_user_id(self, user_id: UUID, page: int = 1, page_size: int = MemoryManagementConfig.CONVERSATION_PAGE_SIZE) -> PaginatedResult[Message]:
+        total_count = self.session.query(MessageEntity).filter(MessageEntity.sender_id == user_id).count()
+        stmt = select(MessageEntity).where(MessageEntity.sender_id == user_id).order_by(MessageEntity.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
 
+        entities = self.session.scalars(stmt).all()
+
+        return PaginatedResult(
+            results=[
+                Message(
+                    id=e.id,
+                    conversation_id=e.conversation_id,
+                    role=e.role,
+                    model_id=e.model_id,
+                    content=e.message,
+                    embedding=e.message_embedding,
+                    parent_message_id=e.parent_message_id,
+                    created_at=e.created_at,
+                    updated_at=e.updated_at,
+                )
+                for e in entities
+            ],
+            page=page,
+            total_pages=total_count // page_size,
+            total_count=total_count,
+            page_size=page_size,
+        )
+
+    async def search_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedResult[MemoryEntry]:
         page_size = MemoryManagementConfig.MEMORY_SEARCH_PAGE_SIZE
         offset = (page - 1) * page_size
 
@@ -150,7 +194,7 @@ class MessageRepository(BaseRepository):
             for e in entities
         ]
 
-        return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
+        return PaginatedResult[MemoryEntry](results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
 
     async def delete_message(self, message_id: UUID) -> None:
         """

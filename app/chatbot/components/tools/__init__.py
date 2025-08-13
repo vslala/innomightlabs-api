@@ -65,7 +65,7 @@ class SendMessageParams(BaseModel):
 )
 async def send_message(state: AgentState, input: SendMessageParams) -> ActionResult:
     state.stream_queue.put_nowait(StreamChunk(content=input.message, step=StreamStep.FINAL_RESPONSE, step_title="Sending message to user"))
-    return ActionResult(thought="", action="send_message", result="Message sent successfully!")
+    return ActionResult(thought="Message sent successfully!", action="send_message", result=input.message)
 
 
 class PythonCodeRunnerParams(BaseParamsModel):

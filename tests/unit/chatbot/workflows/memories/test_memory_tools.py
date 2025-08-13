@@ -267,12 +267,12 @@ class TestPaginationFunctionality:
     @pytest.mark.asyncio
     async def test_conversation_history_pagination(self, mock_agent_state):
         """Test conversation history respects pagination limits"""
-        from app.chatbot.chatbot_models import AgentMessage
+        from app.chatbot.chatbot_models import SingleMessage
         from app.common.models import Role
         from datetime import datetime, timezone
 
         for i in range(10):
-            message = AgentMessage(message=f"Message {i}", role=Role.USER, timestamp=datetime.now(timezone.utc))
+            message = SingleMessage(message=f"Message {i}", role=Role.USER, timestamp=datetime.now(timezone.utc))
             mock_agent_state.messages.append(message)
 
         history = mock_agent_state.build_conversation_history()

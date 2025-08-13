@@ -2,9 +2,8 @@ from uuid import UUID
 from app.common.exceptions import NotFoundException
 from app.common.repositories import BaseRepository
 
-from app.conversation import Conversation
-from app.conversation.conversation_entities import ConversationEntity
-from app.conversation.conversation_models import ConversationRepositoryDTO
+from app.chatbot.conversation import Conversation
+from app.chatbot.conversation.conversation_entities import ConversationEntity
 from app.user import User
 
 
@@ -42,17 +41,18 @@ class ConversationRepository(BaseRepository):
             raise NotFoundException(f"Conversation with ID: {conversation_id} was not found!")
         return Conversation(id=entity.id, title=entity.title, status=entity.status, summary=entity.summary or "", created_at=entity.created_at, updated_at=entity.updated_at)
 
-    def update_conversation(self, dto: ConversationRepositoryDTO) -> Conversation:
-        entity = self.session.query(ConversationEntity).filter_by(id=dto.id).first()
+    def update_conversation(self, domain: Conversation) -> Conversation:
+        entity = self.session.query(ConversationEntity).filter_by(id=domain.id).first()
         assert entity
-        entity.id = dto.id
-        entity.title = dto.title
-        entity.summary = dto.summary
-        entity.status = dto.status
-        entity.summary_embedding = dto.summary_embedding
+        assert domain.summary_embeddings
+        entity.id = domain.id
+        entity.title = domain.title
+        entity.summary = domain.summary
+        entity.status = domain.status
+        entity.summary_embedding = domain.summary_embeddings
 
         self.session.commit()
-        return Conversation(**dto.model_dump())
+        return Conversation(**domain.model_dump())
 
     async def delete_conversation(self, conversation_id: UUID) -> None:
         self.session.query(ConversationEntity).filter_by(id=conversation_id).delete()

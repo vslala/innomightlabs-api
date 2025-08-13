@@ -12,13 +12,13 @@ from app.common.db_connect import SessionLocal
 from app.common.repositories import TransactionManager
 from app.common.vector_embedders import BaseVectorEmbedder, LangChainTitanEmbedder
 from app.common.workflows import BaseAgentWorkflow
-from app.conversation.messages.message_models import AgentVersion
-from app.conversation.messages.message_repositories import MessageRepository
-from app.conversation.messages.message_services import MessageService
+from app.chatbot.chatbot_models import AgentVersion
+from app.chatbot.messages.message_repositories import MessageRepository
+from app.chatbot.messages.message_services import MessageService
 from app.user.user_services import UserService
 from app.user.user_repository import UserRepository
-from app.conversation.conversation_repositories import ConversationRepository
-from app.conversation.conversation_services import ConversationService
+from app.chatbot.conversation.conversation_repositories import ConversationRepository
+from app.chatbot.conversation.conversation_services import ConversationService
 
 
 def get_session() -> Session:
@@ -35,7 +35,7 @@ class SessionFactory:
 class ServiceFactory:
     @staticmethod
     def get_conversation_service() -> ConversationService:
-        return ConversationService(conversation_repository=RepositoryFactory.get_conversation_repository(), chatbot_service=ServiceFactory.get_chatbot_service())
+        return ConversationService(conversation_repository=RepositoryFactory.get_conversation_repository(), embedding_model=ChatbotFactory.get_embedding_model("titan"))
 
     @staticmethod
     def get_user_service() -> UserService:
@@ -46,7 +46,7 @@ class ServiceFactory:
         return ChatbotService(
             chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3", temperature=0.0),
             embedding_model=ChatbotFactory.get_embedding_model(name="titan"),
-            memory_manager=RepositoryFactory.get_memory_manager_repository(),
+            memory_manager=RepositoryFactory.get_memory_manager_v2_repository(),
         )
 
     @staticmethod
@@ -110,11 +110,22 @@ class WorkflowFactory:
     }
 
     @classmethod
-    def create_workflow(cls, version: AgentVersion, state: AgentState, chatbot: BaseChatbot) -> BaseAgentWorkflow:
+    def create_workflow(
+        cls,
+        version: AgentVersion,
+        state: AgentState,
+        chatbot: BaseChatbot = ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3"),
+    ) -> BaseAgentWorkflow:
         if version not in cls._workflows:
             raise ValueError(f"Unknown workflow version: {version}. Available: {list(cls._workflows.keys())}")
         workflow_class = cls._workflows[version]
-        return workflow_class(state, chatbot)
+        return workflow_class(
+            state=state,
+            chatbot=chatbot,
+            conversation_repository=RepositoryFactory.get_conversation_repository(),
+            message_repository=RepositoryFactory.get_message_repository(),
+            embedder=ChatbotFactory.get_embedding_model("titan"),
+        )
 
     @classmethod
     def get_available_versions(cls) -> list[AgentVersion]:

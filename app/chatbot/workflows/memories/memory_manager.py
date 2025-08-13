@@ -1,11 +1,11 @@
 from uuid import UUID
 
 from sqlalchemy import func, select, update
-from app.chatbot.chatbot_models import MemoryEntry, PaginatedMemoryResult
+from app.chatbot.chatbot_models import MemoryEntry, PaginatedResult
 from app.chatbot.workflows.memories.memory_entities import MemoryEntryEntity
 from app.common.models import MemoryManagementConfig
 from app.common.repositories import BaseRepository
-from app.conversation.messages.message_entities import MessageEntity
+from app.chatbot.messages.message_entities import MessageEntity
 
 
 class MemoryManager(BaseRepository):
@@ -68,7 +68,7 @@ class MemoryManager(BaseRepository):
 
         return [ent.to_domain() for ent in entities]
 
-    def search_paginated(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
+    def search_paginated(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedResult[MemoryEntry]:
         """Search memory with pagination support"""
 
         page_size = MemoryManagementConfig.MEMORY_SEARCH_PAGE_SIZE
@@ -95,9 +95,9 @@ class MemoryManager(BaseRepository):
         self.session.commit()
 
         results = [entity.to_domain() for entity in entities]
-        return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
+        return PaginatedResult[MemoryEntry](results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
 
-    async def search_conversation_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedMemoryResult:
+    async def search_conversation_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedResult[MemoryEntry]:
         from app.chatbot.chatbot_models import MemoryEntry, MemoryType
         from app.common.models import MemoryManagementConfig
         from sqlalchemy import func
@@ -135,4 +135,4 @@ class MemoryManager(BaseRepository):
             for e in rows
         ]
 
-        return PaginatedMemoryResult(results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)
+        return PaginatedResult[MemoryEntry](results=results, page=page, total_pages=total_pages, total_count=total_count, page_size=page_size)

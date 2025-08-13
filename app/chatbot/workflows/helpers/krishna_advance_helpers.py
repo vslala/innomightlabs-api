@@ -3,50 +3,19 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 import json
 from loguru import logger
-import re
-
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, ActionResult, AgentMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
+from app.chatbot.chatbot_models import Action, ActionResult, SingleMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
+from app.chatbot.components.conversation_manager import ConversationManager
 from app.chatbot.workflows.prompts.system.intuitive_knowledge import INTUITIVE_KNOWLEDGE
 from app.common.models import Role
-
-
-def write_to_file(filepath: str, content: str) -> None:
-    """
-    Write content to a file, creating directories if they don't exist.
-    """
-    import os
-
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w") as f:
-        f.write(content)
-    logger.info(f"Content written to {filepath}")
-
-
-def extract_tag_content(text: str, tag: str) -> list[str]:
-    """
-    Extracts all text contents inside provided tag.
-    """
-    esc = re.escape(tag)
-    pattern = rf"<{esc}>(.*?)</{esc}>"
-    return re.findall(pattern, text, flags=re.DOTALL)
-
-
-def route_condition(state: AgentState) -> str:
-    """
-    Determine if the final response action is present in the thoughts.
-    """
-    if not state.thought:
-        return "thinker"
-    elif state.thought.action.name == "final_response":
-        return "final_response"
-    return "router"
+from app.common.utils import extract_tag_content, write_to_file
 
 
 class KrishnaAdvanceWorkflowHelper:
-    def __init__(self, chatbot: BaseChatbot) -> None:
+    def __init__(self, chatbot: BaseChatbot, conversation_manager: ConversationManager) -> None:
         self.chatbot = chatbot
+        self.conversation_manager = conversation_manager
 
     def _check_duplicate_tool_call(self, state: AgentState) -> bool:
         """Check if the same tool is being called with identical parameters"""
@@ -63,15 +32,7 @@ class KrishnaAdvanceWorkflowHelper:
         last_tool, last_hash = state.last_tool_call
         return current_tool == last_tool and current_hash == last_hash
 
-    async def thinker(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
-        plan_of_action = ""
-        async for chunk in self.chatbot.stream_response(prompt=state.prompt):
-            plan_of_action += str(chunk)
-
-        state.llm_response = plan_of_action
-        yield state
-
-    def prompt_builder(self, state: AgentState) -> AgentState:
+    async def prompt_builder(self, state: AgentState) -> AgentState:
         """
         Build the prompt for the LLM with MemoryManagerV2 integration
         """
@@ -80,7 +41,7 @@ class KrishnaAdvanceWorkflowHelper:
             "current_time": datetime.now(timezone.utc).isoformat(),
             "archival_memory": state.memory_blocks,
             "recalled_memory": state.build_conversation_context(),
-            "conversation_history": state.build_conversation_history(),
+            "conversation_history": [SingleMessage.from_message(m).model_dump_json() for m in await self.conversation_manager.get_messages()],
             "heartbeats_used": state.epochs,
             "current_user_query": state.user_message,
         }
@@ -92,7 +53,15 @@ class KrishnaAdvanceWorkflowHelper:
         logger.debug(f"Prompt:\n{state.prompt}")
         return state
 
-    def parse_actions(self, state: AgentState) -> AgentState:
+    async def thinker(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
+        plan_of_action = ""
+        async for chunk in self.chatbot.stream_response(prompt=state.prompt):
+            plan_of_action += str(chunk)
+
+        state.llm_response = plan_of_action
+        yield state
+
+    async def parse_actions(self, state: AgentState) -> AgentState:
         import yaml
 
         state.epochs += 1
@@ -119,7 +88,7 @@ class KrishnaAdvanceWorkflowHelper:
         except Exception as e:
             state.retry += 1
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
-            state.messages.append(AgentMessage(message=f"Validation failed while parsing your yaml response: {e}", role=Role.SYSTEM))
+            await self.conversation_manager.append_message(SingleMessage(message=f"Validation failed while parsing your yaml response: {e}", role=Role.SYSTEM))
             raise ValueError(f"Validation failed while parsing your yaml response: {e}") from e
 
         return state
@@ -154,17 +123,18 @@ class KrishnaAdvanceWorkflowHelper:
                 tool_params = {"thought": thought, **input_params}
                 tool_input = selected_tool.args_schema(**tool_params)
                 # LangChain tools expect state and input as separate arguments to the underlying function
-                response = await selected_tool.coroutine(state, tool_input)
+                response = ActionResult.model_validate(await selected_tool.coroutine(state, tool_input))
                 state.observations.append(response)
                 if selected_tool_name == "send_message":
+                    await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
                     state.phase = Phase.NEED_FINAL
                     state.observations = []
                     state.epochs = 0
                     break
                 elif action.request_heartbeat:
                     action_result = ActionResult.model_validate(response)
-                    state.messages.append(AgentMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
-                    state.messages.append(AgentMessage(message=action_result.result, role=Role.USER))
+                    await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
+                    await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
                     state.phase = Phase.NEED_TOOL
                     break
                 else:
@@ -179,17 +149,32 @@ class KrishnaAdvanceWorkflowHelper:
         logger.debug(f"NEXT PHASE: {state.phase}")
         return state
 
+    async def manage_conversations(self, state: AgentState) -> AgentState:
+        """Manage the conversation history"""
+        await self.conversation_manager.handle_messages()
+        return state
+
     async def final_response(self, state: AgentState) -> AgentState:
         """Generate the final response based on the plan and user message"""
+        # Limit conversation history to last 5 messages to avoid context overflow
+        messages = await self.conversation_manager.get_messages()
+        recent_messages = messages[-5:] if len(messages) > 5 else messages
+        conversation_history = "\n".join([f"[{m.role.value}]: {m.content}" for m in recent_messages])
+
         prompt = {
             "system_prompt": "You are Krishna! Answer user's query in the best and concise and friendly way possible.",
-            "conversation_history": state.build_conversation_history(),
+            "conversation_history": conversation_history,
             "current_user_query": state.user_message,
         }
 
         async for chunk in self.chatbot.stream_response(prompt=json.dumps(prompt, indent=2)):
             await state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE, step_title="Sending response..."))
 
+        return state
+
+    async def persist_message_exchange(self, state: AgentState) -> AgentState:
+        """Persist the message exchange"""
+        await self.conversation_manager.handle_final_response()
         return state
 
     def _is_duplicate_action(self, state: AgentState, thought: AgentThought) -> bool:

@@ -3,7 +3,7 @@ from typing import Self
 from uuid import UUID
 from pydantic import BaseModel
 
-from app.conversation import Conversation
+from app.chatbot.conversation import Conversation
 
 
 class ConversationRequest(BaseModel):

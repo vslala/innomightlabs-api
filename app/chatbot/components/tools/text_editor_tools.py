@@ -3,6 +3,8 @@ import json
 from typing import Optional, Union
 from pydantic import BaseModel
 from strands_tools import editor as strands_text_editor
+from io import StringIO
+import sys
 
 from app.chatbot.chatbot_models import ActionResult, AgentState
 from langchain.tools import tool
@@ -167,21 +169,34 @@ async def text_editor(state: AgentState, input: TextEditorInputParams) -> Action
     if input.command in {TextEditorCommand.CREATE}:
         input.path = f"{DIR_PREFIX}/{input.path}"
 
-    output = strands_text_editor.editor(
-        command=input.command.value,
-        path=input.path,
-        file_text=input.file_text,
-        insert_line=input.insert_line,
-        new_str=input.new_str,
-        old_str=input.old_str,
-        pattern=input.pattern,
-        search_text=input.search_text,
-        fuzzy=input.fuzzy,
-        view_range=input.view_range,
-    )
+    # Capture stdout to get console output
+    old_stdout = sys.stdout
+    sys.stdout = captured_output = StringIO()
+
+    try:
+        output = strands_text_editor.editor(
+            command=input.command.value,
+            path=input.path,
+            file_text=input.file_text,
+            insert_line=input.insert_line,
+            new_str=input.new_str,
+            old_str=input.old_str,
+            pattern=input.pattern,
+            search_text=input.search_text,
+            fuzzy=input.fuzzy,
+            view_range=input.view_range,
+        )
+    finally:
+        sys.stdout = old_stdout
+
+    # Get captured output
+    console_output = captured_output.getvalue()
+
+    # Use console output if no return value, otherwise use return value
+    result = console_output if console_output and not output else output
 
     return ActionResult(
         thought=f"Command `text_editor` executed with params: `{input.model_dump_json()}`",
         action=f"text_editor > {input.command.value}",
-        result=json.dumps(output),
+        result=json.dumps(result) if not isinstance(result, str) else result,
     )

@@ -8,8 +8,12 @@ from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentState, Phase, StreamChunk
 from langgraph.graph import StateGraph, START, END
 
+from app.chatbot.conversation.conversation_repositories import ConversationRepository
+from app.chatbot.messages.message_repositories import MessageRepository
 from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper
+from app.common.vector_embedders import BaseVectorEmbedder
 from app.common.workflows import BaseAgentWorkflow
+from app.chatbot.components.conversation_manager import SlidingWindowConversationManager
 
 
 class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
@@ -18,9 +22,19 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
     This workflow is designed to handle complex tasks and interactions.
     """
 
-    def __init__(self, state: AgentState, chatbot: BaseChatbot):
-        super().__init__(state, chatbot)
-        # state.messages.append(AgentMessage(message=state.user_message, role=Role.USER))
+    def __init__(
+        self, state: AgentState, chatbot: BaseChatbot, conversation_repository: ConversationRepository, message_repository: MessageRepository, embedder: BaseVectorEmbedder
+    ):
+        super().__init__(state, chatbot, message_repository=message_repository, conversation_repository=conversation_repository, embedder=embedder)
+        self.conversation_manager = SlidingWindowConversationManager(
+            user=state.user,
+            current_user_message=state.user_message,
+            conversation_id=state.conversation_id,
+            conversation_repository=conversation_repository,
+            message_repository=message_repository,
+            embedder=embedder,
+            chatbot=chatbot,
+        )
 
     def _router(self, state: AgentState) -> str:
         """
@@ -29,7 +43,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         if state.phase == Phase.NEED_TOOL:
             return "prompt_builder"
         elif state.phase == Phase.NEED_FINAL:
-            return "__END__"
+            return "persist_message_exchange"
         else:
             return "error_handler"
 
@@ -40,7 +54,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         shutil.rmtree("/tmp/prompts", ignore_errors=True)
         os.makedirs("/tmp/prompts", exist_ok=True)
 
-        helper = KrishnaAdvanceWorkflowHelper(self.chatbot)
+        helper = KrishnaAdvanceWorkflowHelper(self.chatbot, conversation_manager=self.conversation_manager)
         graph = StateGraph(AgentState)
 
         # 1) prompt_builder: ask LLM to think or finish
@@ -49,6 +63,8 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         graph.add_node("parse_actions", helper.parse_actions)
         graph.add_node("execute_actions", helper.execute_actions)
         graph.add_node("router", self._router)
+        graph.add_node("manage_conversations", helper.manage_conversations)
+        graph.add_node("persist_message_exchange", helper.persist_message_exchange)
         graph.add_node("error_handler", helper.final_response)
 
         # Start → prompt_builder
@@ -56,7 +72,10 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         graph.add_edge("prompt_builder", "thinker")
         graph.add_edge("thinker", "parse_actions")
         graph.add_edge("parse_actions", "execute_actions")
-        graph.add_conditional_edges("execute_actions", self._router, {"prompt_builder": "prompt_builder", "error_handler": "error_handler", "__END__": END}, END)
+        graph.add_conditional_edges(
+            "execute_actions", self._router, {"prompt_builder": "prompt_builder", "error_handler": "error_handler", "persist_message_exchange": "persist_message_exchange"}, END
+        )
+        graph.add_edge("persist_message_exchange", END)
 
         app = graph.compile()
 

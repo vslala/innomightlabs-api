@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from langchain.tools import tool, BaseTool
 
-from app.chatbot.chatbot_models import ActionResult, AgentState
+from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, PaginatedResult
 from app.common.models import MemoryType
 
 # Initialize lazily to avoid circular imports
@@ -204,10 +204,8 @@ async def conversation_search(state: AgentState, input: ConversationSearchParams
     """
     Recalls memory based on the provided query with pagination support.
     """
-    from app.chatbot.chatbot_models import PaginatedMemoryResult
-
     embeddings = get_embedder().embed_single_text(input.query)
-    paginated_result: PaginatedMemoryResult = await get_message_repository().search_paginated_by_user_id_and_embeddings(
+    paginated_result: PaginatedResult[MemoryEntry] = await get_message_repository().search_paginated_by_user_id_and_embeddings(
         user_id=state.user.id, embeddings=embeddings, page=input.page
     )
 

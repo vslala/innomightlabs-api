@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from app.chatbot.chatbot_models import AgentMessage, StreamChunk
+from app.chatbot.chatbot_models import SingleMessage, StreamChunk
 from app.common.models import StreamStep
 from app.common.workflows import BaseAgentWorkflow
 from app.common.models import Role
@@ -51,4 +51,4 @@ class KrishnaMiniWorkflow(BaseAgentWorkflow):
             await asyncio.sleep(0.01)
 
         self.state.agent_message = response_content
-        self.state.messages.append(AgentMessage(message=self.state.agent_message, role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)))
+        self.state.messages.append(SingleMessage(message=self.state.agent_message, role=Role.ASSISTANT, timestamp=datetime.now(timezone.utc)))

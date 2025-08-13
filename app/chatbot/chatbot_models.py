@@ -2,14 +2,30 @@ import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
+from app.chatbot.messages import Message
 from app.common.models import MemoryManagementConfig, MemoryType, Role, StreamStep
-from app.conversation.messages.message_models import AgentVersion
 from app.user import User
+
+
+T = TypeVar("T")
+
+
+class AgentVersion(Enum):
+    """
+    Enum representing the different versions of the agent.
+    """
+
+    KRISHNA = "krishna"
+    KRISHNA_MINI = "krishna-mini"
+    KRISHNA_PRO = "krishna-pro"
+    KRISHNA_ADVANCE = "krishna-advance"
+    KRISHNA_CODE = "krishna-code"
 
 
 class MemoryEntry(BaseModel):
@@ -59,10 +75,10 @@ class MemoryEntry(BaseModel):
         }
 
 
-class PaginatedMemoryResult(BaseModel):
-    """Represents paginated memory search results"""
+class PaginatedResult(BaseModel, Generic[T]):
+    """Generic paginated results"""
 
-    results: list[MemoryEntry]
+    results: list[T]
     page: int
     total_pages: int
     total_count: int
@@ -109,10 +125,14 @@ class StreamChunk(BaseModel):
     step_title: str
 
 
-class AgentMessage(BaseModel):
+class SingleMessage(BaseModel):
     message: str
     role: Role
     timestamp: datetime = Field(default=datetime.now(timezone.utc))
+
+    @classmethod
+    def from_message(cls, message: Message) -> "SingleMessage":
+        return cls(message=message.content, role=message.role, timestamp=message.created_at)
 
     def get_formatted_prompt(self) -> str:
         ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -136,7 +156,7 @@ class AgentState(BaseModel):
     epochs: int = Field(default=0)
 
     user: User
-    messages: list[AgentMessage]
+    conversation_id: UUID
     user_message: str
     agent_message: str = Field(default="")
     prompt: str = Field(default="")
@@ -144,7 +164,7 @@ class AgentState(BaseModel):
 
     # Memory Segments
     system_prompt: str = Field(default="")
-    recall_paginated_result: PaginatedMemoryResult | None = Field(default=None)
+    recall_paginated_result: PaginatedResult[MemoryEntry] | None = Field(default=None)
     memory_blocks: dict[MemoryType, MemoryEntry] = Field(default={})
 
     # Multi-step reasoning fields
@@ -163,15 +183,6 @@ class AgentState(BaseModel):
     last_tool_call: tuple[str, str] | None = Field(default=None)  # (tool_name, params_hash)
 
     stream_queue: asyncio.Queue = Field(default_factory=lambda: asyncio.Queue(maxsize=0))
-
-    def build_conversation_history(self) -> list[str]:
-        """Build the conversation history from the state."""
-        page_size = MemoryManagementConfig.CONVERSATION_PAGE_SIZE
-
-        curr_messages = self.messages[-page_size:]
-        curr_messages.sort(key=lambda msg: msg.timestamp)
-        messages = [msg.model_dump_json() for msg in curr_messages]
-        return messages
 
     def build_observations(self) -> str:
         """Build the observation from the state."""
@@ -204,8 +215,7 @@ class AgentState(BaseModel):
         if not self.recall_paginated_result or not self.recall_paginated_result.results:
             return {}
 
-        stats = "# Recalled Conversation\n"
-        stats += f"[Conversation Search: Page {self.recall_paginated_result.page}/{self.recall_paginated_result.total_pages} |\
+        stats = f"[Conversation Search: Page {self.recall_paginated_result.page}/{self.recall_paginated_result.total_pages} |\
             {len(self.recall_paginated_result.results)} results |\
                 Total: {self.recall_paginated_result.total_count}]"
 
@@ -224,12 +234,12 @@ class AgentState(BaseModel):
         return self.prompt
 
 
-# Requests
+# Internal Agent Request (used by chatbot service)
 class AgentRequest(BaseModel):
     """Represents a request to an agent."""
 
     user: "User"
-    message_history: list[AgentMessage]
+    conversation_id: UUID
     message: str
     version: AgentVersion = Field(default=AgentVersion.KRISHNA_MINI)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -260,3 +270,32 @@ class AgentMessageSummary(BaseModel):
 
     title: str
     summary: str
+
+
+# Chatbot Request/Response Models (formerly Message models)
+class ChatbotRequest(BaseModel):
+    """
+    Represents a request to send a message to the chatbot.
+    """
+
+    content: str
+    parent_message_id: UUID | None = None
+    model_id: str = "gemini-2.0-flash"
+    agent: AgentVersion = Field(default=AgentVersion.KRISHNA_MINI)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MessageResponse(BaseModel):
+    id: UUID
+    content: str
+    role: Role
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ChatbotStreamFinalResponse(BaseModel):
+    title: str
+    summary: str
+    message_id: UUID
+    user_message: str
+    agent_response: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

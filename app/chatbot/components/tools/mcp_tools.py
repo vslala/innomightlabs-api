@@ -15,8 +15,8 @@ from app.chatbot.components.mcp_clients.mcp_stdio_client import (
 MCP_SERVERS_CONFIG: List[MCPServerConfig] = [
     MCPServerConfig(
         server_id="text_editor",
-        command="uvx",
-        args=["mcp-text-editor"],
+        command="npx",
+        args=["-y", "mcp-server-text-editor"],
         env={},
         timeout_sec=30,
     ),

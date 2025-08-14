@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from app.chatbot.chatbot_models import ActionResult, AgentState
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
-from langchain.tools import tool
+from app.common.utils import tool
 import re
 import os
 
@@ -22,7 +22,6 @@ class BrowserParams(BaseModel):
     You can read the contents of the file later using appropriate tools.
     """,
     args_schema=BrowserParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def download_webpage(state: AgentState, input: BrowserParams) -> ActionResult:

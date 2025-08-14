@@ -53,7 +53,7 @@ class MemoryManagerV2(BaseRepository):
         entity = self.session.scalar(stmt)
         return entity.to_domain() if entity else None
 
-    def get_all_memory_blocks(self, user_id: UUID) -> dict[MemoryType, MemoryEntry]:
+    def get_all_memory_blocks(self, user_id: UUID) -> dict[str, MemoryEntry]:
         """Get all memory blocks for a user, organized by type"""
 
         stmt = select(MemoryEntryEntity).where(MemoryEntryEntity.user_id == user_id)
@@ -62,7 +62,7 @@ class MemoryManagerV2(BaseRepository):
         result = {}
         for entity in entities:
             memory_type = MemoryType(entity.memory_type)
-            result[memory_type] = entity.to_domain()
+            result[memory_type.value] = entity.to_domain()
 
         return result
 

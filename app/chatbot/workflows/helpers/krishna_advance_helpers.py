@@ -39,14 +39,17 @@ class KrishnaAdvanceWorkflowHelper:
         prompt = {
             "system_prompt": INTUITIVE_KNOWLEDGE,
             "current_time": datetime.now(timezone.utc).isoformat(),
-            "archival_memory": state.memory_blocks,
+            "archival_memory": [v.serialize() for k, v in state.memory_blocks.items()],
             "recalled_memory": state.build_conversation_context(),
             "conversation_history": [SingleMessage.from_message(m).model_dump_json() for m in await self.conversation_manager.get_messages()],
             "heartbeats_used": state.epochs,
             "current_user_query": state.user_message,
         }
 
-        state.prompt = json.dumps(prompt, indent=2)
+        if state.epochs > 10:
+            prompt.update({"CRITICAL": f"TOO MANY HEART BEATS USED (>{state.epochs}). RESPOND TO USER ASAP."})
+
+        state.prompt = json.dumps(prompt, indent=2, default=str)
         logger.info(f"Prompt built for epoch {state.epochs}")
         state.stream_queue.put_nowait(item=StreamChunk(content="Thinking...", step=StreamStep.ANALYSIS, step_title="Thinking..."))
         write_to_file(f"/tmp/prompts/prompt_{state.epochs}.md", state.prompt)
@@ -95,7 +98,7 @@ class KrishnaAdvanceWorkflowHelper:
 
     async def execute_actions(self, state: AgentState) -> AgentState:
         """Execute the actions in the plan"""
-        import app.chatbot.workflows.helpers.tools as Tools
+        import app.chatbot.components.tools as Tools
         import hashlib
         import json
 
@@ -142,7 +145,7 @@ class KrishnaAdvanceWorkflowHelper:
                     break
             else:
                 # Custom async function
-                response = await selected_tool(state)
+                response = await selected_tool.func(state)
                 state.observations.append(response)
                 state.phase = Phase.NEED_FINAL
 

@@ -10,11 +10,12 @@ from pydantic import BaseModel
 import wikipedia
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
-from langchain.tools import tool, BaseTool
+from app.common.utils import tool, SimpleTool as BaseTool
 
 from app.chatbot.chatbot_models import ActionResult, AgentState, StreamChunk
-from app.chatbot.workflows.helpers.tools.memory_tools import BaseParamsModel, memory_tools_v2
-from app.chatbot.workflows.helpers.tools import text_editor_tools, browser_tools
+from app.chatbot.components.tools.memory_tools import BaseParamsModel, memory_tools_v2
+from app.chatbot.components.tools import text_editor_tools, browser_tools
+from app.chatbot.components.tools.mcp_tools import mcp_actions
 from app.common.models import StreamStep
 
 _shared_ns: dict = {}
@@ -60,7 +61,6 @@ class SendMessageParams(BaseModel):
     "send_message",
     description="Sends the message to the user. Always provide markdown text so it can be rendered properly for the user.",
     args_schema=SendMessageParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def send_message(state: AgentState, input: SendMessageParams) -> ActionResult:
@@ -79,7 +79,6 @@ class PythonCodeRunnerParams(BaseParamsModel):
     "python_code_runner",
     description="Executes python code and adds the result to working context",
     args_schema=PythonCodeRunnerParams,
-    infer_schema=True,
     return_direct=True,
 )
 async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -> ActionResult:
@@ -171,7 +170,6 @@ class DownloadWebPageByUrlParams(BaseModel):
     "download_webpage_by_url",
     description="Downloads the webpage to local temp from the given url and provides the file path. You can use file reading tools to read the data.",
     args_schema=DownloadWebPageByUrlParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def download_webpage_by_url(state: AgentState, input: DownloadWebPageByUrlParams) -> ActionResult:
@@ -279,11 +277,20 @@ async def wikipedia_search_tool(state: AgentState) -> ActionResult:
     return result
 
 
+def get_available_actions() -> list[BaseTool]:
+    """Get all available tools including MCP tools"""
+    memory_actions: list[BaseTool] = memory_tools_v2
+    additional_actions: list[BaseTool] = [send_message, python_code_runner, text_editor_tools.text_editor, browser_tools.download_webpage]
+
+    return memory_actions + additional_actions + mcp_actions
+
+
+# Backward compatibility
 memory_actions: list[BaseTool] = memory_tools_v2
-additional_actions: list[BaseTool] = [send_message, python_code_runner, text_editor_tools.text_editor, browser_tools.download_webpage]
-available_actions = memory_actions + additional_actions
+additional_actions: list[BaseTool] = [send_message, python_code_runner, browser_tools.download_webpage]
+available_actions = memory_actions + additional_actions + mcp_actions
 
 
-new_tools = {}
+new_tools: dict[str, BaseTool] = {}
 for my_tool in available_actions:
     new_tools[my_tool.name] = my_tool

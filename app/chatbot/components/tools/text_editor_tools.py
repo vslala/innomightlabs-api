@@ -7,7 +7,7 @@ from io import StringIO
 import sys
 
 from app.chatbot.chatbot_models import ActionResult, AgentState
-from langchain.tools import tool
+from app.common.utils import tool
 
 import os
 
@@ -162,7 +162,6 @@ class TextEditorInputParams(BaseModel):
            editor(command="undo_edit", path="/path/to/file.py")
     """,
     args_schema=TextEditorInputParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def text_editor(state: AgentState, input: TextEditorInputParams) -> ActionResult:

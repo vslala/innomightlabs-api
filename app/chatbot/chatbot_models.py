@@ -165,7 +165,7 @@ class AgentState(BaseModel):
     # Memory Segments
     system_prompt: str = Field(default="")
     recall_paginated_result: PaginatedResult[MemoryEntry] | None = Field(default=None)
-    memory_blocks: dict[MemoryType, MemoryEntry] = Field(default={})
+    memory_blocks: dict[str, MemoryEntry] = Field(default={})
 
     # Multi-step reasoning fields
     phase: Phase = Field(default=Phase.NEED_FINAL)
@@ -205,7 +205,7 @@ class AgentState(BaseModel):
             return "No memory blocks available."
 
         blocks_display = []
-        for memory_type, entry in self.memory_blocks.items():
+        for memory_type_str, entry in self.memory_blocks.items():
             blocks_display.append(entry.serialize())
 
         return "\n".join(blocks_display)

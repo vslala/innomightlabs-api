@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from langchain.tools import tool, BaseTool
+from app.common.utils import tool, SimpleTool as BaseTool
 
 from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, PaginatedResult
 from app.common.models import MemoryType
@@ -50,7 +50,6 @@ class MemoryBlockUpsertParams(BaseParamsModel):
     "memory_block_upsert",
     description="Create or update a unique memory block for the specified type. Each memory type has only one block per user.",
     args_schema=MemoryBlockUpsertParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_block_upsert(state: AgentState, input: MemoryBlockUpsertParams) -> ActionResult:
@@ -71,7 +70,6 @@ class MemoryBlockReplaceParams(BaseParamsModel):
     "memory_block_replace",
     description="Replace specific text within a memory block. Use this to update specific information in memory blocks.",
     args_schema=MemoryBlockReplaceParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_block_replace(state: AgentState, input: MemoryBlockReplaceParams) -> ActionResult:
@@ -96,7 +94,6 @@ class MemoryBlockReadParams(BaseParamsModel):
     "memory_block_read",
     description="Read the entire content of a specific memory block type.",
     args_schema=MemoryBlockReadParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_block_read(state: AgentState, input: MemoryBlockReadParams) -> ActionResult:
@@ -119,7 +116,6 @@ class MemoryBlockAppendParams(BaseParamsModel):
     "memory_block_append",
     description="Append text to an existing memory block or create a new one if it doesn't exist.",
     args_schema=MemoryBlockAppendParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_block_append(state: AgentState, input: MemoryBlockAppendParams) -> ActionResult:
@@ -142,7 +138,6 @@ class MemoryBlockDeleteParams(BaseParamsModel):
     "memory_block_delete",
     description="Delete an entire memory block for the specified type.",
     args_schema=MemoryBlockDeleteParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_block_delete(state: AgentState, input: MemoryBlockDeleteParams) -> ActionResult:
@@ -162,7 +157,6 @@ async def memory_block_delete(state: AgentState, input: MemoryBlockDeleteParams)
     "memory_blocks_list_all",
     description="Get all memory blocks for the current user, organized by type.",
     args_schema=BaseParamsModel,
-    infer_schema=False,
     return_direct=True,
 )
 async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> ActionResult:
@@ -177,7 +171,7 @@ async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> A
     block_summary = []
     for memory_type, entry in all_blocks.items():
         size = len(entry.content)
-        block_summary.append(f"- {memory_type.value}: {size} chars")
+        block_summary.append(f"- {memory_type}: {size} chars")
     return ActionResult(thought="Listed all memory blocks", action="memory_blocks_list_all", result="Memory blocks:\n" + "\n".join(block_summary))
 
 
@@ -197,7 +191,6 @@ class ConversationSearchParams(BaseParamsModel):
         - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
         """,
     args_schema=ConversationSearchParams,
-    infer_schema=False,
     return_direct=True,
 )
 async def conversation_search(state: AgentState, input: ConversationSearchParams) -> ActionResult:

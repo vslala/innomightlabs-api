@@ -108,9 +108,7 @@ class SlidingWindowConversationManager(ConversationManager):
         return sorted(self.session_messages, key=lambda x: x.created_at)
 
     async def append_message(self, message: SingleMessage) -> None:
-        self.session_messages.append(
-            Message(content=message.message, role=message.role, conversation_id=self.conversation_id, embedding=self.embedder.embed_single_text(message.message))
-        )
+        self.session_messages.append(Message(content=message.message, role=message.role, conversation_id=self.conversation_id))
 
     async def _update_conversation_title_and_summary(self) -> None:
         conversation = self.conversation_repository.find_conversation_by_id(conversation_id=self.conversation_id)

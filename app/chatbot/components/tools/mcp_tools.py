@@ -14,9 +14,9 @@ from app.chatbot.components.mcp_clients.mcp_stdio_client import (
 # 1) Configure your MCP servers here (or load from JSON and build the list)
 MCP_SERVERS_CONFIG: List[MCPServerConfig] = [
     MCPServerConfig(
-        server_id="text_editor",
-        command="npx",
-        args=["-y", "mcp-server-text-editor"],
+        server_id="my_text_editor",
+        command="uv",
+        args=["run", "/Users/vslala/src/code/projects/innomightlabs/innomightlabs-api/app/mcp_servers/mcp_text_editor.py"],
         env={},
         timeout_sec=30,
     ),

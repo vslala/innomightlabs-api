@@ -120,34 +120,40 @@ class KrishnaAdvanceWorkflowHelper:
             params_hash = hashlib.md5(json.dumps(input_params, sort_keys=True).encode()).hexdigest()
             state.last_tool_call = (selected_tool_name, params_hash)
 
-            # Handle LangChain tools vs custom async functions differently
-            if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
-                # LangChain tool - create proper input object with thought from state
-                tool_params = {"thought": thought, **input_params}
-                tool_input = selected_tool.args_schema(**tool_params)
-                # LangChain tools expect state and input as separate arguments to the underlying function
-                response = ActionResult.model_validate(await selected_tool.coroutine(state, tool_input))
-                state.observations.append(response)
-                if selected_tool_name == "send_message":
-                    await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
-                    state.phase = Phase.NEED_FINAL
-                    state.observations = []
-                    state.epochs = 0
-                    break
-                elif action.request_heartbeat:
-                    action_result = ActionResult.model_validate(response)
-                    await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
-                    await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
-                    state.phase = Phase.NEED_TOOL
-                    break
+            try:
+                # Handle LangChain tools vs custom async functions differently
+                if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
+                    # LangChain tool - create proper input object with thought from state
+                    tool_params = {"thought": thought, **input_params}
+                    tool_input = selected_tool.args_schema(**tool_params)
+                    # LangChain tools expect state and input as separate arguments to the underlying function
+                    response = ActionResult.model_validate(await selected_tool.coroutine(state, tool_input))
+                    state.observations.append(response)
+                    if selected_tool_name == "send_message":
+                        await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
+                        state.phase = Phase.NEED_FINAL
+                        state.observations = []
+                        state.epochs = 0
+                        break
+                    elif action.request_heartbeat:
+                        action_result = ActionResult.model_validate(response)
+                        await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
+                        await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
+                        state.phase = Phase.NEED_TOOL
+                        break
+                    else:
+                        state.phase = Phase.ERROR
+                        break
                 else:
-                    state.phase = Phase.ERROR
-                    break
-            else:
-                # Custom async function
-                response = await selected_tool.func(state)
-                state.observations.append(response)
-                state.phase = Phase.NEED_FINAL
+                    # Custom async function
+                    response = await selected_tool.func(state)
+                    state.observations.append(response)
+                    state.phase = Phase.NEED_FINAL
+            except Exception as e:
+                logger.error(f"Error executing action: {e}")
+                state.phase = Phase.NEED_TOOL
+                await self.conversation_manager.append_message(SingleMessage(message=f"Error executing action: {e}", role=Role.USER))
+                break
 
         logger.debug(f"NEXT PHASE: {state.phase}")
         return state

@@ -56,9 +56,9 @@ class ClaudeSonnetChatbot(BaseChatbot):
             "region": os.getenv("AWS_REGION", "us-east-1"),
         }
 
-        # Only use profile for local development
-        if stage == "local":
-            bedrock_kwargs["credentials_profile_name"] = os.getenv("AWS_PROFILE", "searchexpert")
+        # Only use profile for local development if AWS_PROFILE is explicitly set
+        if stage == "local" and os.getenv("AWS_PROFILE"):
+            bedrock_kwargs["credentials_profile_name"] = os.getenv("AWS_PROFILE")
 
         self.llm = ChatBedrock(**bedrock_kwargs)
 

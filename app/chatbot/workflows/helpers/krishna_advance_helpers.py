@@ -48,8 +48,8 @@ class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
         prompt = {
             "system_prompt": {
                 "intuitive_knowledge": get_intuitive_knowledge(),
-                "available_actions": self.tools_manager.get_tools_schema(),
                 "available_memory_types": [label.value for label in MemoryType],
+                "available_actions": self.tools_manager.get_tools_schema(),
                 "output": {
                     "critical_format_rules": self.tools_manager.format_rules,
                     "format_name": self.tools_manager.format_name,

@@ -6,6 +6,8 @@ A minimal implementation of text editor tools using the MCP protocol.
 
 from typing import Dict, Optional
 import os
+import glob
+import fnmatch
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from loguru import logger
@@ -214,6 +216,204 @@ def replace(path: str, old_str: str, new_str: str) -> Dict:
     except Exception as e:
         logger.error(f"Failed to replace content in {path}: {str(e)}")
         return {"success": False, "message": f"Failed to replace content: {str(e)}"}
+
+
+@mcp_server.tool()
+def list_files(pattern: str) -> Dict:
+    """List files matching a pattern
+
+    Examples:
+        # List all Python files in a directory
+        list_files(pattern="app/chatbot/*.py")
+
+        # List all files recursively
+        list_files(pattern="app/**/*.py")
+
+        # List specific file types
+        list_files(pattern="*.json")
+    """
+    try:
+        matches = glob.glob(pattern, recursive=True)
+        matches = [os.path.abspath(match) for match in matches if os.path.isfile(match)]
+        matches.sort()
+
+        logger.info(f"Found {len(matches)} files matching pattern '{pattern}'")
+        return {"success": True, "message": f"Found {len(matches)} files matching pattern '{pattern}'", "files": matches}
+    except Exception as e:
+        logger.error(f"Failed to list files with pattern {pattern}: {str(e)}")
+        return {"success": False, "message": f"Failed to list files: {str(e)}"}
+
+
+@mcp_server.tool()
+def append(path: str, content: str) -> Dict:
+    """Append content to the end of a file
+
+    Examples:
+        # Append a line to a file
+        append(
+            path="/path/to/file.txt",
+            content="This line will be added at the end\n"
+        )
+
+        # Append a log entry
+        append(
+            path="/path/to/log.txt",
+            content="[2025-08-24] New log entry\n"
+        )
+
+        # Append code to a Python file
+        append(
+            path="/path/to/script.py",
+            content="\n\ndef new_function():\n    print('This is a new function')\n"
+        )
+    """
+    try:
+        if not os.path.exists(path):
+            logger.warning(f"Attempted to append to non-existent file: {path}")
+            return {"success": False, "message": f"File {path} does not exist"}
+
+        logger.debug(f"Opening file for appending: {path}")
+        with open(path, "a") as f:
+            f.write(content)
+
+        logger.info(f"Successfully appended content to {path}")
+        return {"success": True, "message": f"Appended content to {path}"}
+    except Exception as e:
+        logger.error(f"Failed to append to file {path}: {str(e)}")
+        return {"success": False, "message": f"Failed to append to file: {str(e)}"}
+
+
+@mcp_server.tool()
+def tree(path: str, max_depth: int = 3) -> Dict:
+    """Visualize directory structure in a tree format
+
+    Examples:
+        # View project structure
+        tree(path="/path/to/project")
+
+        # View with limited depth
+        tree(
+            path="/path/to/project",
+            max_depth=2
+        )
+    """
+    try:
+        if not os.path.exists(path):
+            logger.warning(f"Directory {path} does not exist")
+            return {"success": False, "message": f"Directory {path} does not exist"}
+
+        if not os.path.isdir(path):
+            logger.warning(f"{path} is not a directory")
+            return {"success": False, "message": f"{path} is not a directory"}
+
+        result = []
+
+        def generate_tree(dir_path, prefix="", depth=0):
+            if depth > max_depth:
+                return
+
+            entries = sorted(os.listdir(dir_path))
+            dirs = [e for e in entries if os.path.isdir(os.path.join(dir_path, e))]
+            files = [e for e in entries if os.path.isfile(os.path.join(dir_path, e))]
+
+            # Process directories
+            for i, dirname in enumerate(dirs):
+                is_last_dir = i == len(dirs) - 1 and len(files) == 0
+                current_prefix = "└── " if is_last_dir else "├── "
+                result.append(f"{prefix}{current_prefix}{dirname}/")
+
+                # Prepare prefix for subdirectories
+                new_prefix = prefix + ("    " if is_last_dir else "│   ")
+                generate_tree(os.path.join(dir_path, dirname), new_prefix, depth + 1)
+
+            # Process files
+            for i, filename in enumerate(files):
+                is_last = i == len(files) - 1
+                result.append(f"{prefix}{'└── ' if is_last else '├── '}{filename}")
+
+        # Start with the root directory name
+        root_name = os.path.basename(os.path.abspath(path))
+        result.append(f"{root_name}/")
+        generate_tree(path, "", 0)
+
+        tree_output = "\n".join(result)
+        logger.info(f"Generated directory tree for {path} with max depth {max_depth}")
+        return {"success": True, "message": f"Directory structure for {path} (max depth: {max_depth})", "tree": tree_output}
+    except Exception as e:
+        logger.error(f"Failed to generate tree for {path}: {str(e)}")
+        return {"success": False, "message": f"Failed to generate tree: {str(e)}"}
+
+
+@mcp_server.tool()
+def search_in_files(path: str, pattern: str, file_glob: str = "*.*") -> Dict:
+    """Search for text pattern in files matching glob pattern
+
+    Examples:
+        # Search for a function in Python files
+        search_in_files(
+            path="/path/to/project",
+            pattern="def process_data",
+            file_glob="*.py"
+        )
+
+        # Search for configuration in JSON files
+        search_in_files(
+            path="/path/to/configs",
+            pattern="debug_mode",
+            file_glob="*.json"
+        )
+    """
+    try:
+        if not os.path.exists(path):
+            logger.warning(f"Path {path} does not exist")
+            return {"success": False, "message": f"Path {path} does not exist"}
+
+        results = []
+        file_count = 0
+        match_count = 0
+
+        # Handle both directory and single file cases
+        if os.path.isdir(path):
+            search_path = os.path.join(path, "**", file_glob)
+            files = glob.glob(search_path, recursive=True)
+        else:
+            # If path is a file and matches the glob pattern
+            if fnmatch.fnmatch(os.path.basename(path), file_glob):
+                files = [path]
+            else:
+                files = []
+
+        for file_path in files:
+            if not os.path.isfile(file_path):
+                continue
+
+            file_count += 1
+            try:
+                with open(file_path, "r", errors="replace") as f:
+                    lines = f.readlines()
+
+                file_matches = []
+                for i, line in enumerate(lines):
+                    if pattern in line:
+                        match_count += 1
+                        file_matches.append(
+                            {
+                                "line_number": i + 1,  # 1-indexed line numbers
+                                "line": line.rstrip(),
+                            }
+                        )
+
+                if file_matches:
+                    rel_path = os.path.relpath(file_path, path) if os.path.isdir(path) else os.path.basename(file_path)
+                    results.append({"file": rel_path, "matches": file_matches})
+            except Exception as e:
+                logger.warning(f"Error reading {file_path}: {str(e)}")
+
+        logger.info(f"Found {match_count} matches in {len(results)} files (searched {file_count} files)")
+        return {"success": True, "message": f"Found {match_count} matches in {len(results)} files (searched {file_count} files)", "results": results}
+    except Exception as e:
+        logger.error(f"Failed to search in files: {str(e)}")
+        return {"success": False, "message": f"Failed to search in files: {str(e)}"}
 
 
 if __name__ == "__main__":

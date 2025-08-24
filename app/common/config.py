@@ -1,10 +1,14 @@
-from typing import Literal
+from typing import Literal, Optional
 import os
 from sqlalchemy.orm import Session
 
 from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
 from app.chatbot.chatbot_models import AgentState
 from app.chatbot.chatbot_services import ChatbotService
+from app.chatbot.components.conversation_manager import ConversationManager, SlidingWindowConversationManager
+from app.chatbot.components.tools_manager.json_tools_manager import JsonToolsManager
+from app.chatbot.components.tools_manager.yaml_tools_manager import YamlToolsManager
+from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper
 from app.chatbot.workflows.krishna_advance import KrishnaAdvanceWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
 from app.chatbot.workflows.memories.memory_manager import MemoryManager
@@ -118,6 +122,50 @@ class ChatbotFactory:
         return LangChainTitanEmbedder()
 
 
+class ToolsManagerFactory:
+    from app.chatbot.components.tools_manager import ToolsManager
+    from app.chatbot.components.tools_manager.yaml_tools_manager import YamlToolsManager
+    from app.chatbot.components.tools_manager.json_tools_manager import JsonToolsManager
+
+    @classmethod
+    def get_tools_manager(cls, format_type: Optional[str] = None) -> ToolsManager:
+        """
+        Factory function to get the appropriate ToolsManager
+        based on the format type or app configuration.
+
+        Args:
+            format_type: Optional format type ('yaml' or 'json').
+                        If None, defaults to the app configuration.
+
+        Returns:
+            An instance of the appropriate ToolsManager implementation.
+        """
+        try:
+            from app.common.config import AppConfig
+
+            default_format = getattr(AppConfig, "TOOL_FORMAT", "yaml")
+        except (ImportError, AttributeError):
+            default_format = "yaml"
+
+        format_type = (format_type or default_format or "yaml").lower()
+
+        if format_type == "json":
+            return JsonToolsManager()
+        else:  # Default to YAML
+            return YamlToolsManager()
+
+
+class ConversationManagerFactory:
+    @classmethod
+    def get_sliding_window_conversation_manager(cls) -> ConversationManager:
+        return SlidingWindowConversationManager(
+            chatbot=ChatbotFactory.create_chatbot(owner="anthropic", model_name="sonnet3"),
+            message_repository=RepositoryFactory.get_message_repository(),
+            conversation_repository=RepositoryFactory.get_conversation_repository(),
+            embedder=ChatbotFactory.get_embedding_model("titan"),
+        )
+
+
 class WorkflowFactory:
     _workflows: dict[AgentVersion, type[BaseAgentWorkflow]] = {
         AgentVersion.KRISHNA_MINI: KrishnaMiniWorkflow,
@@ -134,6 +182,21 @@ class WorkflowFactory:
         if version not in cls._workflows:
             raise ValueError(f"Unknown workflow version: {version}. Available: {list(cls._workflows.keys())}")
         workflow_class = cls._workflows[version]
+
+        if workflow_class == KrishnaAdvanceWorkflow:
+            return workflow_class(
+                state=state,
+                chatbot=chatbot,
+                conversation_repository=RepositoryFactory.get_conversation_repository(),
+                message_repository=RepositoryFactory.get_message_repository(),
+                embedder=ChatbotFactory.get_embedding_model("titan"),
+                workflow_helper=KrishnaAdvanceWorkflowHelper(
+                    chatbot=chatbot,
+                    conversation_manager=ConversationManagerFactory.get_sliding_window_conversation_manager(),
+                    tools_manager=ToolsManagerFactory.get_tools_manager(format_type="json"),
+                ),
+            )
+
         return workflow_class(
             state=state,
             chatbot=chatbot,

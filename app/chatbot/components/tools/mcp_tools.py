@@ -11,10 +11,9 @@ from app.chatbot.components.mcp_clients.mcp_stdio_client import (
     MCPStdioClient,
 )
 
-# 1) Configure your MCP servers here (or load from JSON and build the list)
 MCP_SERVERS_CONFIG: List[MCPServerConfig] = [
     MCPServerConfig(
-        server_id="my_text_editor",
+        server_id="text_editor",
         command="uv",
         args=["run", "/Users/vslala/src/code/projects/innomightlabs/innomightlabs-api/app/mcp_servers/mcp_text_editor.py"],
         env={},
@@ -56,7 +55,7 @@ def _make_server_tool(server_id: str) -> BaseTool:
     client = _clients[server_id]
 
     @tool(
-        name=f"mcp_{server_id}",
+        name=f"{server_id}",
         description=f"Call a tool on MCP server '{server_id}'. "
         f"Use 'tool' to select the remote tool and 'arguments' for its params. "
         f"Tip: call mcp_list_tools for available tool names.",

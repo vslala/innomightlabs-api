@@ -1,4 +1,5 @@
 from typing import Literal
+import os
 from sqlalchemy.orm import Session
 
 from app.chatbot import BaseChatbot, ClaudeSonnetChatbot, GeminiChatbot
@@ -8,6 +9,7 @@ from app.chatbot.workflows.krishna_advance import KrishnaAdvanceWorkflow
 from app.chatbot.workflows.krishna_mini import KrishnaMiniWorkflow
 from app.chatbot.workflows.memories.memory_manager import MemoryManager
 from app.chatbot.workflows.memories.memory_manager_v2 import MemoryManagerV2
+from app.chatbot.workflows.memories.memory_manager_v3 import MemoryManagerV3
 from app.common.db_connect import SessionLocal
 from app.common.repositories import TransactionManager
 from app.common.vector_embedders import BaseVectorEmbedder, LangChainTitanEmbedder
@@ -19,6 +21,15 @@ from app.user.user_services import UserService
 from app.user.user_repository import UserRepository
 from app.chatbot.conversation.conversation_repositories import ConversationRepository
 from app.chatbot.conversation.conversation_services import ConversationService
+
+
+# Application configuration settings
+class AppConfig:
+    """Global application configuration settings"""
+
+    # Tool format: 'yaml' or 'json'
+    # Can be overridden by environment variable TOOL_FORMAT
+    TOOL_FORMAT = os.getenv("TOOL_FORMAT", "yaml").lower()
 
 
 def get_session() -> Session:
@@ -82,6 +93,10 @@ class RepositoryFactory:
     @staticmethod
     def get_memory_manager_v2_repository() -> MemoryManagerV2:
         return MemoryManagerV2(session=SessionFactory.get_session())
+
+    @staticmethod
+    def get_memory_manager_v3_repository() -> MemoryManagerV3:
+        return MemoryManagerV3(session=SessionFactory.get_session(), embedder=ChatbotFactory.get_embedding_model("titan"))
 
 
 class ChatbotFactory:

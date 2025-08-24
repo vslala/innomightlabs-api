@@ -94,6 +94,7 @@ class SlidingWindowConversationManager(ConversationManager):
         Args:
             messages (list[Message]): _description_
         """
+
         if len(self.session_messages) > self.window_size:
             self.stored_messages = self.session_messages[-self.window_size :]
 

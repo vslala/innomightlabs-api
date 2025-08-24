@@ -8,6 +8,9 @@ from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentState, Phase, StreamChunk
 from langgraph.graph import StateGraph, START, END
 
+from app.chatbot.components.tools import conversation_search, mcp_tools, memory_tools_v3, python_code_runner, send_message
+from app.chatbot.components.tools_manager import ToolCategory
+from app.chatbot.components.tools_manager.factory import get_tools_manager
 from app.chatbot.conversation.conversation_repositories import ConversationRepository
 from app.chatbot.messages.message_repositories import MessageRepository
 from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper
@@ -35,6 +38,16 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
             embedder=embedder,
             chatbot=chatbot,
         )
+
+        tools_manager = get_tools_manager()
+        for tool in memory_tools_v3.memory_tools_v3:
+            tools_manager.register_tool(ToolCategory.MEMORY, tool)
+        for tool in mcp_tools.mcp_actions:
+            tools_manager.register_tool(ToolCategory.MCP, tool)
+
+        tools_manager.register_tool(ToolCategory.CORE, conversation_search)
+        tools_manager.register_tool(ToolCategory.CORE, send_message)
+        tools_manager.register_tool(ToolCategory.CODE, python_code_runner)
 
     def _router(self, state: AgentState) -> str:
         """

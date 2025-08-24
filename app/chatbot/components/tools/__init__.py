@@ -3,19 +3,17 @@ import io
 import json
 import os
 import tempfile
+from typing import Optional
 import aiohttp
 from bs4 import BeautifulSoup
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import wikipedia
 from contextlib import redirect_stdout
 from pdfminer.high_level import extract_text
-from app.common.utils import tool, SimpleTool as BaseTool
+from app.common.utils import tool
 
-from app.chatbot.chatbot_models import ActionResult, AgentState, StreamChunk
-from app.chatbot.components.tools.memory_tools import BaseParamsModel, memory_tools_v2
-from app.chatbot.components.tools import text_editor_tools, browser_tools
-from app.chatbot.components.tools.mcp_tools import mcp_actions
+from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, PaginatedResult, StreamChunk
 from app.common.models import StreamStep
 
 _shared_ns: dict = {}
@@ -54,21 +52,33 @@ def get_message_repository():
 class SendMessageParams(BaseModel):
     """Sends the message to the user"""
 
-    message: str
+    message: Optional[str] = Field(None, description="Send the message to the user")
+    filepath: Optional[str] = Field(None, description="Provide the path of the file that will be used to send response to the user directly")
 
 
 @tool(
     "send_message",
-    description="Sends the message to the user. Always provide markdown text so it can be rendered properly for the user.",
+    description="""Sends the message to the user. Either provide the response directly using `message` attr or provide the `filepath` whose content will be sent to the user. 
+    Always provide markdown text so it can be rendered properly for the user.""",
     args_schema=SendMessageParams,
     return_direct=True,
 )
 async def send_message(state: AgentState, input: SendMessageParams) -> ActionResult:
-    state.stream_queue.put_nowait(StreamChunk(content=input.message, step=StreamStep.FINAL_RESPONSE, step_title="Sending message to user"))
-    return ActionResult(thought="Message sent successfully!", action="send_message", result=input.message)
+    if input.message:
+        state.stream_queue.put_nowait(StreamChunk(content=input.message, step=StreamStep.FINAL_RESPONSE, step_title="Sending message to user"))
+        return ActionResult(thought="Message sent successfully!", action="send_message", result=input.message)
+
+    if input.filepath:
+        content = ""
+        with open(input.filepath) as f:
+            content += f.readline()
+            state.stream_queue.put_nowait(StreamChunk(content=f.readline(), step=StreamStep.FINAL_RESPONSE, step_title="Sending message to user"))
+        return ActionResult(thought="Message sent successfully!", action="send_message", result=content)
+
+    return ActionResult(thought="Wrong input provided", action="send_message", result="", error="Wrong input format! Send either `message` or `filepath` for output")
 
 
-class PythonCodeRunnerParams(BaseParamsModel):
+class PythonCodeRunnerParams(BaseModel):
     """Runs python code and returns the output"""
 
     thought: str
@@ -109,57 +119,6 @@ async def python_code_runner(state: AgentState, input: PythonCodeRunnerParams) -
 
     logger.info(f"\nGot the result: {result}\n\n")
     return result
-
-
-async def read_data_from_disk_memory(state: AgentState) -> ActionResult:
-    if not state.thought or (state.thought and state.thought.action.name != "read_data_from_disk_memory"):
-        return ActionResult(thought="", action="None", result="")
-
-    state.stream_queue.put_nowait(StreamChunk(content=state.thought.thought, step=StreamStep.ANALYSIS, step_title="Reading into local memory"))
-
-    filepath = state.thought.action.params.get("filepath")
-    if not filepath:
-        return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result="Require filepath to load memory")
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = f.read()
-        return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=data)
-
-
-async def write_data_to_disk_memory(state: AgentState) -> ActionResult:
-    """
-    Tool: writes the data to a temp file in the system temp directory so it can be retrieved later
-    Params: {
-        data: str,
-        filename_prefix?: str,
-        filepath?: str # full path to append to (optional)
-    }
-    Returns the path of the file as observation
-    """
-    if not state.thought or (state.thought and state.thought.action.name != "write_data_to_disk_memory"):
-        return ActionResult(thought="", action="None", result="")
-
-    state.stream_queue.put_nowait(StreamChunk(content=state.thought.thought, step=StreamStep.ANALYSIS, step_title="Writing to temp memory"))
-
-    data = state.thought.action.params["data"]
-    target = state.thought.action.params.get("filepath")
-
-    if target:
-        # append to (or create) the specified file
-        path = target
-        mode = "a"
-    else:
-        # make a brand‑new temp file
-        prefix = state.thought.action.params.get("filename_prefix", "data_")
-        fd, path = tempfile.mkstemp(suffix=".txt", prefix=prefix)
-        os.close(fd)
-        mode = "w"
-
-    # write or append
-    with open(path, mode, encoding="utf-8") as f:
-        f.write(data)
-
-    state.filepaths.append(path)
-    return ActionResult(thought=state.thought.thought, action=state.thought.action.name, result=json.dumps({"filepath": path}))
 
 
 class DownloadWebPageByUrlParams(BaseModel):
@@ -264,8 +223,8 @@ async def wikipedia_search_tool(state: AgentState) -> ActionResult:
     if not query:
         return ActionResult(thought="", action="None", result="No query provided for wikipedia_search.")
 
-    # Notify user we’re searching
-    state.stream_queue.put_nowait(StreamChunk(content=f"🔍 Searching Wikipedia for “{query}”", step=StreamStep.ANALYSIS, step_title="Wikipedia Search"))
+    # Notify user we're searching
+    state.stream_queue.put_nowait(StreamChunk(content=f"🔍 Searching Wikipedia for '{query}'", step=StreamStep.ANALYSIS, step_title="Wikipedia Search"))
 
     try:
         # Do the search and grab the summary
@@ -277,20 +236,36 @@ async def wikipedia_search_tool(state: AgentState) -> ActionResult:
     return result
 
 
-def get_available_actions() -> list[BaseTool]:
-    """Get all available tools including MCP tools"""
-    memory_actions: list[BaseTool] = memory_tools_v2
-    additional_actions: list[BaseTool] = [send_message, python_code_runner, text_editor_tools.text_editor, browser_tools.download_webpage]
+class ConversationSearchParams(BaseModel):
+    """Recalls memory based on the provided query"""
 
-    return memory_actions + additional_actions + mcp_actions
-
-
-# Backward compatibility
-memory_actions: list[BaseTool] = memory_tools_v2
-additional_actions: list[BaseTool] = [send_message, python_code_runner, browser_tools.download_webpage]
-available_actions = memory_actions + additional_actions + mcp_actions
+    query: str
+    page: int = Field(default=1)
 
 
-new_tools: dict[str, BaseTool] = {}
-for my_tool in available_actions:
-    new_tools[my_tool.name] = my_tool
+@tool(
+    "conversation_search",
+    description="""Loads older conversation into working context as "recall" memory blocks
+        - Use `page` param to scroll through older conversation if you don't find something in the given page
+        - Do not go past the last page
+        - If it returns [], _you must not call `conversation_search` again for the same query_.  
+        - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
+        """,
+    args_schema=ConversationSearchParams,
+    return_direct=True,
+)
+async def conversation_search(state: AgentState, input: ConversationSearchParams) -> ActionResult:
+    """
+    Recalls memory based on the provided query with pagination support.
+    """
+    embeddings = get_embedder().embed_single_text(input.query)
+    paginated_result: PaginatedResult[MemoryEntry] = await get_message_repository().search_paginated_by_user_id_and_embeddings(
+        user_id=state.user.id, embeddings=embeddings, page=input.page
+    )
+
+    if not paginated_result.results:
+        return ActionResult(thought="", action="conversation_search", result="[]")
+
+    state.recall_paginated_result = paginated_result
+    result_msg = "Older conversation loaded into working context"
+    return ActionResult(thought="", action="conversation_search", result=result_msg)

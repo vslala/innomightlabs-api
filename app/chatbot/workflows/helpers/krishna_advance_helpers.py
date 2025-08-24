@@ -5,9 +5,10 @@ import json
 from loguru import logger
 
 from app.chatbot import BaseChatbot
-from app.chatbot.chatbot_models import Action, ActionResult, SingleMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
+from app.chatbot.chatbot_models import ActionResult, SingleMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.components.conversation_manager import ConversationManager
-from app.chatbot.workflows.prompts.system.intuitive_knowledge import INTUITIVE_KNOWLEDGE
+from app.chatbot.components.tools_manager.factory import get_tools_manager
+from app.chatbot.workflows.prompts.system.intuitive_knowledge import get_intuitive_knowledge
 from app.common.models import Role
 from app.common.utils import extract_tag_content, write_to_file
 
@@ -16,6 +17,8 @@ class KrishnaAdvanceWorkflowHelper:
     def __init__(self, chatbot: BaseChatbot, conversation_manager: ConversationManager) -> None:
         self.chatbot = chatbot
         self.conversation_manager = conversation_manager
+        # Force the use of JSON format to ensure consistency with the system prompt
+        self.tools_manager = get_tools_manager("json")
 
     def _check_duplicate_tool_call(self, state: AgentState) -> bool:
         """Check if the same tool is being called with identical parameters"""
@@ -37,7 +40,7 @@ class KrishnaAdvanceWorkflowHelper:
         Build the prompt for the LLM with MemoryManagerV2 integration
         """
         prompt = {
-            "system_prompt": INTUITIVE_KNOWLEDGE,
+            "system_prompt": get_intuitive_knowledge(),
             "current_time": datetime.now(timezone.utc).isoformat(),
             "archival_memory": [v.serialize() for k, v in state.memory_blocks.items()],
             "recalled_memory": state.build_conversation_context(),
@@ -65,97 +68,117 @@ class KrishnaAdvanceWorkflowHelper:
         yield state
 
     async def parse_actions(self, state: AgentState) -> AgentState:
-        import yaml
-
         state.epochs += 1
-        logger.info(f"Validating Response\n\n{state.llm_response}...")
+        logger.info(f"Validating Response (Epoch {state.epochs})")
+        logger.info(f"Full Response:\n{state.llm_response}")
         plan = state.llm_response
 
         try:
-            # ——— 1) inner_monologue handling unchanged ———
+            # ——— 1) Extract inner_monologue sections ———
             thoughts = deque([])
-            for monologue in extract_tag_content(plan, "inner_monologue") or []:
+            monologue_blocks = extract_tag_content(plan, "inner_monologue") or []
+
+            for monologue in monologue_blocks:
                 text = monologue.strip()
                 state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
                 thoughts.append(text)
-                # state.stream_queue.put_nowait(StreamChunk(content=text, step=StreamStep.PLANNING, step_title="Reflecting..."))
 
-            for idx, action in enumerate(extract_tag_content(plan, "action")) or []:
-                action = action.strip()
-                action = yaml.safe_load(action)
-                action = Action.model_validate(action)
-                state.thoughts.append(AgentThought(thought=thoughts[idx], action=action))
+            # ——— 2) Extract and parse action blocks ———
+            action_blocks = extract_tag_content(plan, "action") or []
 
-            write_to_file(f"/tmp/prompts/response_{state.epochs}.md", plan)
+            if not action_blocks:
+                logger.warning("No action blocks found in response!")
+
+            for idx, action_block in enumerate(action_blocks):
+                if idx >= len(thoughts):
+                    # Ensure we have enough thoughts to pair with actions
+                    logger.info(f"Adding empty thought for action {idx + 1} (no matching monologue)")
+                    thoughts.append("")
+
+                logger.info(f"Parsing action block {idx + 1} using {self.tools_manager.format_name} format")
+                action_with_tags = f"<action>\n{action_block}\n</action>"
+                parsed_actions = await self.tools_manager.parse_tool_calls(action_with_tags)
+                logger.info(f"Parsed {len(parsed_actions)} actions from block {idx + 1}")
+
+                for action_idx, action in enumerate(parsed_actions):
+                    if action:
+                        logger.info(f"Adding action: {action.name} to thoughts queue")
+                        state.thoughts.append(AgentThought(thought=thoughts[idx], action=action))
+                    else:
+                        logger.warning(f"Skipping None action at index {action_idx}")
+
+            logger.info(f"Total thoughts with actions: {len(state.thoughts)}")
 
         except Exception as e:
             state.retry += 1
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
-            await self.conversation_manager.append_message(SingleMessage(message=f"Validation failed while parsing your yaml response: {e}", role=Role.SYSTEM))
-            raise ValueError(f"Validation failed while parsing your yaml response: {e}") from e
+            logger.exception("Detailed exception info:")
+            format_name = getattr(self.tools_manager, "format_name", "response")
+            await self.conversation_manager.append_message(SingleMessage(message=f"Validation failed while parsing your {format_name} response: {e}", role=Role.SYSTEM))
+            raise ValueError(f"Validation failed while parsing your {format_name} response: {e}") from e
 
         return state
 
     async def execute_actions(self, state: AgentState) -> AgentState:
         """Execute the actions in the plan"""
-        import app.chatbot.components.tools as Tools
         import hashlib
         import json
 
         logger.info("\n\nExecuting Actions...\n\n")
+        logger.info(f"Number of thoughts to process: {len(state.thoughts)}")
 
         while state.thoughts:
             thought = state.thoughts.popleft()
             action = thought.action
-            selected_tool_name = action.name
-            if selected_tool_name not in Tools.new_tools:
-                logger.error(f"Unknown tool: {selected_tool_name}")
-                state.phase = Phase.ERROR
-                return state
 
-            selected_tool = Tools.new_tools[selected_tool_name]
-            input_params = action.params
+            logger.info(f"Processing action: {action.name} with params: {action.params}")
+            logger.info(f"Request heartbeat: {action.request_heartbeat}")
 
             # Update last tool call tracking
-            params_hash = hashlib.md5(json.dumps(input_params, sort_keys=True).encode()).hexdigest()
-            state.last_tool_call = (selected_tool_name, params_hash)
+            params_hash = hashlib.md5(json.dumps(action.params, sort_keys=True).encode()).hexdigest()
+            state.last_tool_call = (action.name, params_hash)
 
             try:
-                # Handle LangChain tools vs custom async functions differently
-                if hasattr(selected_tool, "args_schema") and hasattr(selected_tool, "invoke"):
-                    # LangChain tool - create proper input object with thought from state
-                    tool_params = {"thought": thought, **input_params}
-                    tool_input = selected_tool.args_schema(**tool_params)
-                    # LangChain tools expect state and input as separate arguments to the underlying function
-                    response = ActionResult.model_validate(await selected_tool.coroutine(state, tool_input))
-                    state.observations.append(response)
-                    if selected_tool_name == "send_message":
-                        await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
-                        state.phase = Phase.NEED_FINAL
-                        state.observations = []
-                        state.epochs = 0
-                        break
-                    elif action.request_heartbeat:
-                        action_result = ActionResult.model_validate(response)
-                        await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
-                        await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
-                        state.phase = Phase.NEED_TOOL
-                        break
-                    else:
-                        state.phase = Phase.ERROR
-                        break
-                else:
-                    # Custom async function
-                    response = await selected_tool.func(state)
-                    state.observations.append(response)
+                # Use the tools manager to execute the tool
+                logger.info(f"Executing tool: {action.name}")
+                response = await self.tools_manager.execute_tool(state, thought)
+                logger.info(f"Tool execution result type: {type(response).__name__}")
+                state.observations.append(response)
+
+                # Handle special cases based on the tool and response
+                if action.name == "send_message":
+                    logger.info(f"Handling send_message action with response: {response.result}")
+                    await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
+                    logger.info("Message appended to conversation")
                     state.phase = Phase.NEED_FINAL
+                    state.observations = []
+                    state.epochs = 0
+                    logger.info("Phase set to NEED_FINAL after send_message")
+                    break
+                elif action.request_heartbeat:
+                    logger.info("Handling action with heartbeat request")
+                    # Ensure response is an ActionResult
+                    action_result = ActionResult.model_validate(response) if not isinstance(response, ActionResult) else response
+
+                    # Log the action and result in the conversation
+                    await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
+                    await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
+                    state.phase = Phase.NEED_TOOL
+                    logger.info("Phase set to NEED_TOOL for heartbeat action")
+                    break
+                else:
+                    logger.warning(f"Action {action.name} has no heartbeat and is not `send_message`")
+                    state.phase = Phase.ERROR
+                    break
+
             except Exception as e:
                 logger.error(f"Error executing action: {e}")
+                logger.exception("Detailed exception info:")
                 state.phase = Phase.NEED_TOOL
                 await self.conversation_manager.append_message(SingleMessage(message=f"Error executing action: {e}", role=Role.USER))
                 break
 
-        logger.debug(f"NEXT PHASE: {state.phase}")
+        logger.info(f"NEXT PHASE: {state.phase}")
         return state
 
     async def manage_conversations(self, state: AgentState) -> AgentState:
@@ -176,8 +199,13 @@ class KrishnaAdvanceWorkflowHelper:
             "current_user_query": state.user_message,
         }
 
+        final_message = ""
         async for chunk in self.chatbot.stream_response(prompt=json.dumps(prompt, indent=2)):
             await state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE, step_title="Sending response..."))
+            final_message += str(chunk)
+
+        await self.conversation_manager.append_message(SingleMessage(message=final_message, role=Role.ASSISTANT))
+        await self.conversation_manager.handle_final_response()
 
         return state
 

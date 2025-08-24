@@ -20,10 +20,26 @@ def write_to_file(filepath: str, content: str) -> None:
 def extract_tag_content(text: str, tag: str) -> list[str]:
     """
     Extracts all text contents inside provided tag.
+    Works with both <tag>content</tag> style tags.
     """
+    if text is None:
+        return []
+
     esc = re.escape(tag)
     pattern = rf"<{esc}>(.*?)</{esc}>"
-    return re.findall(pattern, text, flags=re.DOTALL)
+    matches = re.findall(pattern, text, flags=re.DOTALL)
+
+    # Log for debugging
+    if tag == "action":
+        from loguru import logger
+
+        logger.debug(f"extract_tag_content found {len(matches)} '{tag}' tags")
+        if not matches:
+            # Log a snippet of the text to help debug
+            max_length = min(len(text), 500)
+            logger.debug(f"No '{tag}' tags found in text snippet (first {max_length} chars):\n{text[:max_length]}")
+
+    return matches
 
 
 class SimpleTool:

@@ -2,8 +2,8 @@ import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Generic, TypeVar
-from uuid import UUID
+from typing import Any, Generic, Optional, TypeVar
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,7 +29,7 @@ class AgentVersion(Enum):
 
 
 class MemoryEntry(BaseModel):
-    id: UUID
+    id: UUID = Field(default_factory=uuid4)
     user_id: UUID
     created_at: datetime = Field(default=datetime.now(timezone.utc))
     memory_type: MemoryType
@@ -38,6 +38,9 @@ class MemoryEntry(BaseModel):
     embedding: list[float] = Field(default=[])
     is_active: bool = Field(default=True)
     evicted_at: datetime | None = Field(default=None)
+
+    def model_post_init(self, context: Any) -> None:
+        self.metadata["size"] = len(self.content)
 
     def append(self, text: str) -> None:
         """Append text to the memory block"""
@@ -92,6 +95,7 @@ class ActionResult(BaseModel):
     thought: str
     action: str
     result: str
+    error: Optional[str] = Field(default=None)
 
     def __str__(self) -> str:
         return f"[{self.action} - {datetime.now(timezone.utc)}] {self.result}"

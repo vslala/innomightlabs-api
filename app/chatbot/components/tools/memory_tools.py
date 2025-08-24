@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from app.common.utils import tool, SimpleTool as BaseTool
 
-from app.chatbot.chatbot_models import ActionResult, AgentState, MemoryEntry, PaginatedResult
+from app.chatbot.chatbot_models import ActionResult, AgentState
 from app.common.models import MemoryType
 
 # Initialize lazily to avoid circular imports
@@ -57,7 +57,7 @@ async def memory_block_upsert(state: AgentState, input: MemoryBlockUpsertParams)
     embedding = get_embedder().embed_single_text(input.content)
     get_memory_manager_v2().upsert_memory_block(user_id=state.user.id, memory_type=memory_type, content=input.content, embedding=embedding)
     state.memory_blocks = get_memory_manager_v2().get_all_memory_blocks(state.user.id)
-    return ActionResult(thought="Upserted memory block", action="memory_block_upsert", result=f"Memory block '{memory_type.value}' updated with content: {input.content[:100]}...")
+    return ActionResult(thought="Upserted memory block", action="memory_block_upsert", result=f"Memory block '{memory_type.value}' updated. Check your memory segment.")
 
 
 class MemoryBlockReplaceParams(BaseParamsModel):
@@ -98,11 +98,10 @@ class MemoryBlockReadParams(BaseParamsModel):
 )
 async def memory_block_read(state: AgentState, input: MemoryBlockReadParams) -> ActionResult:
     memory_type = MemoryType(input.memory_type.lower())
-
     memory_entry = get_memory_manager_v2().read_memory_block(user_id=state.user.id, memory_type=memory_type)
-
     if not memory_entry:
         return ActionResult(thought="Memory block not found", action="memory_block_read", result=f"No memory block found for type '{memory_type.value}'")
+    state.memory_blocks[memory_type.value] = memory_entry
     return ActionResult(thought="Retrieved memory block", action="memory_block_read", result=f"Memory block '{memory_type.value}': {memory_entry.content}")
 
 
@@ -175,47 +174,11 @@ async def memory_blocks_list_all(state: AgentState, input: BaseParamsModel) -> A
     return ActionResult(thought="Listed all memory blocks", action="memory_blocks_list_all", result="Memory blocks:\n" + "\n".join(block_summary))
 
 
-class ConversationSearchParams(BaseParamsModel):
-    """Recalls memory based on the provided query"""
-
-    query: str
-    page: int = Field(default=1)
-
-
-@tool(
-    "conversation_search",
-    description="""Loads older conversation into working context as "recall" memory blocks
-        - Use `page` param to scroll through older conversation if you don't find something in the given page
-        - Do not go past the last page
-        - If it returns [], _you must not call `conversation_search` again for the same query_.  
-        - Instead, you should fall back to another action (e.g. send a clarification request to the user).  
-        """,
-    args_schema=ConversationSearchParams,
-    return_direct=True,
-)
-async def conversation_search(state: AgentState, input: ConversationSearchParams) -> ActionResult:
-    """
-    Recalls memory based on the provided query with pagination support.
-    """
-    embeddings = get_embedder().embed_single_text(input.query)
-    paginated_result: PaginatedResult[MemoryEntry] = await get_message_repository().search_paginated_by_user_id_and_embeddings(
-        user_id=state.user.id, embeddings=embeddings, page=input.page
-    )
-
-    if not paginated_result.results:
-        return ActionResult(thought="", action="conversation_search", result="[]")
-
-    state.recall_paginated_result = paginated_result
-    result_msg = "Older conversation loaded into working context"
-    return ActionResult(thought="", action="conversation_search", result=result_msg)
-
-
 # Export memory tools for LLM
 memory_tools_v2: list[BaseTool] = [
     memory_block_upsert,
     memory_block_replace,
     memory_block_read,
-    conversation_search,
     # memory_block_append,
     # memory_block_delete,
     # memory_blocks_list_all,

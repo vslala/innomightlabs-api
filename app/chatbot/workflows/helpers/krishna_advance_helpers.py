@@ -1,5 +1,4 @@
 from collections import deque
-from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 import json
 from loguru import logger
@@ -7,18 +6,25 @@ from loguru import logger
 from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import ActionResult, SingleMessage, AgentState, AgentThought, Phase, StreamChunk, StreamStep
 from app.chatbot.components.conversation_manager import ConversationManager
-from app.chatbot.components.tools_manager.factory import get_tools_manager
+from app.chatbot.components.tools import conversation_search, mcp_tools, memory_tools_v3, python_code_runner, send_message
+from app.chatbot.components.tools_manager import ToolCategory, ToolsManager
 from app.chatbot.workflows.prompts.system.intuitive_knowledge import get_intuitive_knowledge
-from app.common.models import Role
+from app.common.models import MemoryType, Role
 from app.common.utils import extract_tag_content, write_to_file
+from app.common.workflows import BaseWorkflowHelper
 
 
-class KrishnaAdvanceWorkflowHelper:
-    def __init__(self, chatbot: BaseChatbot, conversation_manager: ConversationManager) -> None:
-        self.chatbot = chatbot
-        self.conversation_manager = conversation_manager
-        # Force the use of JSON format to ensure consistency with the system prompt
-        self.tools_manager = get_tools_manager("json")
+class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
+    def __init__(self, chatbot: BaseChatbot, conversation_manager: ConversationManager, tools_manager: ToolsManager) -> None:
+        super().__init__(chatbot, conversation_manager, tools_manager)
+        for tool in memory_tools_v3.memory_tools_v3:
+            tools_manager.register_tool(ToolCategory.MEMORY, tool)
+        for tool in mcp_tools.mcp_actions:
+            tools_manager.register_tool(ToolCategory.MCP, tool)
+
+        tools_manager.register_tool(ToolCategory.CORE, conversation_search)
+        tools_manager.register_tool(ToolCategory.CORE, send_message)
+        tools_manager.register_tool(ToolCategory.CODE, python_code_runner)
 
     def _check_duplicate_tool_call(self, state: AgentState) -> bool:
         """Check if the same tool is being called with identical parameters"""
@@ -40,11 +46,21 @@ class KrishnaAdvanceWorkflowHelper:
         Build the prompt for the LLM with MemoryManagerV2 integration
         """
         prompt = {
-            "system_prompt": get_intuitive_knowledge(),
-            "current_time": datetime.now(timezone.utc).isoformat(),
+            "system_prompt": {
+                "intuitive_knowledge": get_intuitive_knowledge(),
+                "available_actions": self.tools_manager.get_tools_schema(),
+                "available_memory_types": [label.value for label in MemoryType],
+                "output": {
+                    "critical_format_rules": self.tools_manager.format_rules,
+                    "format_name": self.tools_manager.format_name,
+                    "output_format": self.tools_manager.output_format_instructions,
+                    "output_examples": self.tools_manager.output_examples,
+                },
+            },
+            "current_time_in_utc": datetime.now(timezone.utc).isoformat(),
             "archival_memory": [v.serialize() for k, v in state.memory_blocks.items()],
             "recalled_memory": state.build_conversation_context(),
-            "conversation_history": [SingleMessage.from_message(m).model_dump_json() for m in await self.conversation_manager.get_messages()],
+            "conversation_history": [SingleMessage.from_message(m).model_dump_json() for m in await self.conversation_manager.get_messages(user=state.user)],
             "heartbeats_used": state.epochs,
             "current_user_query": state.user_message,
         }
@@ -59,13 +75,13 @@ class KrishnaAdvanceWorkflowHelper:
         logger.debug(f"Prompt:\n{state.prompt}")
         return state
 
-    async def thinker(self, state: AgentState) -> AsyncGenerator[AgentState, None]:
+    async def thinker(self, state: AgentState) -> AgentState:
         plan_of_action = ""
         async for chunk in self.chatbot.stream_response(prompt=state.prompt):
             plan_of_action += str(chunk)
 
         state.llm_response = plan_of_action
-        yield state
+        return state
 
     async def parse_actions(self, state: AgentState) -> AgentState:
         state.epochs += 1
@@ -148,7 +164,7 @@ class KrishnaAdvanceWorkflowHelper:
                 # Handle special cases based on the tool and response
                 if action.name == "send_message":
                     logger.info(f"Handling send_message action with response: {response.result}")
-                    await self.conversation_manager.append_message(SingleMessage(message=response.result, role=Role.ASSISTANT))
+                    await self.conversation_manager.append_message(conversation_id=state.conversation_id, message=SingleMessage(message=response.result, role=Role.ASSISTANT))
                     logger.info("Message appended to conversation")
                     state.phase = Phase.NEED_FINAL
                     state.observations = []
@@ -161,8 +177,10 @@ class KrishnaAdvanceWorkflowHelper:
                     action_result = ActionResult.model_validate(response) if not isinstance(response, ActionResult) else response
 
                     # Log the action and result in the conversation
-                    await self.conversation_manager.append_message(SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT))
-                    await self.conversation_manager.append_message(SingleMessage(message=action_result.result, role=Role.USER))
+                    await self.conversation_manager.append_message(
+                        conversation_id=state.conversation_id, message=SingleMessage(message=thought.action.model_dump_json(), role=Role.ASSISTANT)
+                    )
+                    await self.conversation_manager.append_message(conversation_id=state.conversation_id, message=SingleMessage(message=action_result.result, role=Role.USER))
                     state.phase = Phase.NEED_TOOL
                     logger.info("Phase set to NEED_TOOL for heartbeat action")
                     break
@@ -175,7 +193,7 @@ class KrishnaAdvanceWorkflowHelper:
                 logger.error(f"Error executing action: {e}")
                 logger.exception("Detailed exception info:")
                 state.phase = Phase.NEED_TOOL
-                await self.conversation_manager.append_message(SingleMessage(message=f"Error executing action: {e}", role=Role.USER))
+                await self.conversation_manager.append_message(conversation_id=state.conversation_id, message=SingleMessage(message=f"Error executing action: {e}", role=Role.USER))
                 break
 
         logger.info(f"NEXT PHASE: {state.phase}")
@@ -186,10 +204,10 @@ class KrishnaAdvanceWorkflowHelper:
         await self.conversation_manager.handle_messages()
         return state
 
-    async def final_response(self, state: AgentState) -> AgentState:
+    async def error_handler(self, state: AgentState) -> AgentState:
         """Generate the final response based on the plan and user message"""
         # Limit conversation history to last 5 messages to avoid context overflow
-        messages = await self.conversation_manager.get_messages()
+        messages = await self.conversation_manager.get_messages(user=state.user)
         recent_messages = messages[-5:] if len(messages) > 5 else messages
         conversation_history = "\n".join([f"[{m.role.value}]: {m.content}" for m in recent_messages])
 
@@ -204,14 +222,14 @@ class KrishnaAdvanceWorkflowHelper:
             await state.stream_queue.put(StreamChunk(content=str(chunk), step=StreamStep.FINAL_RESPONSE, step_title="Sending response..."))
             final_message += str(chunk)
 
-        await self.conversation_manager.append_message(SingleMessage(message=final_message, role=Role.ASSISTANT))
-        await self.conversation_manager.handle_final_response()
+        await self.conversation_manager.append_message(conversation_id=state.conversation_id, message=SingleMessage(message=final_message, role=Role.ASSISTANT))
+        await self.conversation_manager.handle_final_response(user=state.user, conversation_id=state.conversation_id, current_user_message=state.user_message)
 
         return state
 
     async def persist_message_exchange(self, state: AgentState) -> AgentState:
         """Persist the message exchange"""
-        await self.conversation_manager.handle_final_response()
+        await self.conversation_manager.handle_final_response(user=state.user, conversation_id=state.conversation_id, current_user_message=state.user_message)
         return state
 
     def _is_duplicate_action(self, state: AgentState, thought: AgentThought) -> bool:

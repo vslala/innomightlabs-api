@@ -8,15 +8,10 @@ from app.chatbot import BaseChatbot
 from app.chatbot.chatbot_models import AgentState, Phase, StreamChunk
 from langgraph.graph import StateGraph, START, END
 
-from app.chatbot.components.tools import conversation_search, mcp_tools, memory_tools_v3, python_code_runner, send_message
-from app.chatbot.components.tools_manager import ToolCategory
-from app.chatbot.components.tools_manager.factory import get_tools_manager
 from app.chatbot.conversation.conversation_repositories import ConversationRepository
 from app.chatbot.messages.message_repositories import MessageRepository
-from app.chatbot.workflows.helpers.krishna_advance_helpers import KrishnaAdvanceWorkflowHelper
 from app.common.vector_embedders import BaseVectorEmbedder
-from app.common.workflows import BaseAgentWorkflow
-from app.chatbot.components.conversation_manager import SlidingWindowConversationManager
+from app.common.workflows import BaseAgentWorkflow, BaseWorkflowHelper
 
 
 class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
@@ -26,28 +21,16 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
     """
 
     def __init__(
-        self, state: AgentState, chatbot: BaseChatbot, conversation_repository: ConversationRepository, message_repository: MessageRepository, embedder: BaseVectorEmbedder
+        self,
+        state: AgentState,
+        chatbot: BaseChatbot,
+        conversation_repository: ConversationRepository,
+        message_repository: MessageRepository,
+        embedder: BaseVectorEmbedder,
+        workflow_helper: BaseWorkflowHelper,
     ):
         super().__init__(state, chatbot, message_repository=message_repository, conversation_repository=conversation_repository, embedder=embedder)
-        self.conversation_manager = SlidingWindowConversationManager(
-            user=state.user,
-            current_user_message=state.user_message,
-            conversation_id=state.conversation_id,
-            conversation_repository=conversation_repository,
-            message_repository=message_repository,
-            embedder=embedder,
-            chatbot=chatbot,
-        )
-
-        tools_manager = get_tools_manager()
-        for tool in memory_tools_v3.memory_tools_v3:
-            tools_manager.register_tool(ToolCategory.MEMORY, tool)
-        for tool in mcp_tools.mcp_actions:
-            tools_manager.register_tool(ToolCategory.MCP, tool)
-
-        tools_manager.register_tool(ToolCategory.CORE, conversation_search)
-        tools_manager.register_tool(ToolCategory.CORE, send_message)
-        tools_manager.register_tool(ToolCategory.CODE, python_code_runner)
+        self.workflow_helper = workflow_helper
 
     def _router(self, state: AgentState) -> str:
         """
@@ -67,7 +50,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         shutil.rmtree("/tmp/prompts", ignore_errors=True)
         os.makedirs("/tmp/prompts", exist_ok=True)
 
-        helper = KrishnaAdvanceWorkflowHelper(self.chatbot, conversation_manager=self.conversation_manager)
+        helper = self.workflow_helper
         graph = StateGraph(AgentState)
 
         # 1) prompt_builder: ask LLM to think or finish
@@ -78,7 +61,7 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         graph.add_node("router", self._router)
         graph.add_node("manage_conversations", helper.manage_conversations)
         graph.add_node("persist_message_exchange", helper.persist_message_exchange)
-        graph.add_node("error_handler", helper.final_response)
+        graph.add_node("error_handler", helper.error_handler)
 
         # Start → prompt_builder
         graph.add_edge(START, "prompt_builder")

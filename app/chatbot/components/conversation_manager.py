@@ -17,9 +17,6 @@ from loguru import logger
 class ConversationManager(ABC):
     def __init__(
         self,
-        user: User,
-        current_user_message: str,
-        conversation_id: UUID,
         conversation_repository: ConversationRepository,
         message_repository: MessageRepository,
         embedder: BaseVectorEmbedder,
@@ -27,9 +24,6 @@ class ConversationManager(ABC):
     ):
         self.conversation_repository = conversation_repository
         self.message_repository = message_repository
-        self.user = user
-        self.current_user_message = current_user_message
-        self.conversation_id = conversation_id
         self.embedder = embedder
         self.chatbot = chatbot
 
@@ -38,37 +32,34 @@ class ConversationManager(ABC):
         pass
 
     @abstractmethod
-    async def get_messages(self) -> list[Message]:
+    async def get_messages(self, user: User) -> list[Message]:
         """
         Get all messages from the conversation
         """
         raise NotImplementedError
 
     @abstractmethod
-    async def append_message(self, message: SingleMessage) -> None:
+    async def append_message(self, conversation_id: UUID, message: SingleMessage) -> None:
         """
         Add a message to the conversation
         """
         raise NotImplementedError
 
-    async def dump_messages(self) -> list[str]:
+    async def dump_messages(self, user: User) -> list[str]:
         """
         Dump all messages from the conversation as JSON strings
         """
-        messages = await self.get_messages()
+        messages = await self.get_messages(user=user)
         return [m.model_dump_json() for m in messages]
 
     @abstractmethod
-    async def handle_final_response(self) -> None:
+    async def handle_final_response(self, user: User, conversation_id: UUID, current_user_message: str) -> None:
         raise NotImplementedError
 
 
 class SlidingWindowConversationManager(ConversationManager):
     def __init__(
         self,
-        user: User,
-        current_user_message: str,
-        conversation_id: UUID,
         conversation_repository: ConversationRepository,
         message_repository: MessageRepository,
         embedder: BaseVectorEmbedder,
@@ -76,9 +67,6 @@ class SlidingWindowConversationManager(ConversationManager):
         window_size: int = MemoryManagementConfig.CONVERSATION_PAGE_SIZE,
     ):
         super().__init__(
-            user=user,
-            current_user_message=current_user_message,
-            conversation_id=conversation_id,
             conversation_repository=conversation_repository,
             message_repository=message_repository,
             embedder=embedder,
@@ -98,21 +86,21 @@ class SlidingWindowConversationManager(ConversationManager):
         if len(self.session_messages) > self.window_size:
             self.stored_messages = self.session_messages[-self.window_size :]
 
-    async def get_messages(self) -> list[Message]:
+    async def get_messages(self, user: User) -> list[Message]:
         """
         Get all messages from the conversation
         """
         if not self.session_messages:
-            result = await self.message_repository.fetch_all_paginated_by_user_id(user_id=self.user.id)
+            result = await self.message_repository.fetch_all_paginated_by_user_id(user_id=user.id)
             self.session_messages = result.results
 
         return sorted(self.session_messages, key=lambda x: x.created_at)
 
-    async def append_message(self, message: SingleMessage) -> None:
-        self.session_messages.append(Message(content=message.message, role=message.role, conversation_id=self.conversation_id))
+    async def append_message(self, conversation_id: UUID, message: SingleMessage) -> None:
+        self.session_messages.append(Message(content=message.message, role=message.role, conversation_id=conversation_id))
 
-    async def _update_conversation_title_and_summary(self) -> None:
-        conversation = self.conversation_repository.find_conversation_by_id(conversation_id=self.conversation_id)
+    async def _update_conversation_title_and_summary(self, conversation_id: UUID) -> None:
+        conversation = self.conversation_repository.find_conversation_by_id(conversation_id=conversation_id)
         if not conversation.summary or conversation.title == "New Conversation":
             logger.info("Updating conversation title and summary")
             agent_response = self.chatbot.get_text_response(
@@ -139,7 +127,7 @@ class SlidingWindowConversationManager(ConversationManager):
             conversation.summary_embeddings = self.embedder.embed_single_text(summary)
             self.conversation_repository.update_conversation(domain=conversation)
 
-    async def handle_final_response(self) -> None:
+    async def handle_final_response(self, user: User, conversation_id: UUID, current_user_message: str) -> None:
         """
         This method will be called when the final response is received
         """
@@ -147,13 +135,11 @@ class SlidingWindowConversationManager(ConversationManager):
         final_response = self.session_messages[-1].content
 
         self.message_repository.batch_add_messages(
-            user_id=self.user.id,
+            user_id=user.id,
             messages=[
-                Message(
-                    content=self.current_user_message, role=Role.USER, conversation_id=self.conversation_id, embedding=self.embedder.embed_single_text(self.current_user_message)
-                ),
-                Message(content=final_response, role=Role.ASSISTANT, conversation_id=self.conversation_id, embedding=self.embedder.embed_single_text(final_response)),
+                Message(content=current_user_message, role=Role.USER, conversation_id=conversation_id, embedding=self.embedder.embed_single_text(current_user_message)),
+                Message(content=final_response, role=Role.ASSISTANT, conversation_id=conversation_id, embedding=self.embedder.embed_single_text(final_response)),
             ],
         )
 
-        asyncio.create_task(self._update_conversation_title_and_summary())
+        asyncio.create_task(self._update_conversation_title_and_summary(conversation_id=conversation_id))

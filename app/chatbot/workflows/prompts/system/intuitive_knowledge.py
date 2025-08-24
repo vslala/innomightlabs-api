@@ -2,28 +2,6 @@
 INTUITIVE_KNOWLEDGE system prompt for Krishna AI.
 """
 
-from app.common.models import MemoryType
-
-
-def get_tools_manager_lazy():
-    """Lazy import to avoid circular dependencies"""
-    from app.chatbot.components.tools_manager import get_tools_manager
-
-    return get_tools_manager("json")
-
-
-def get_label_instructions() -> list[str]:
-    """
-    Returns a string representation of the available labels for actions.
-    """
-    values = [label.value for label in MemoryType]
-    #     return f"""
-    # You can choose from the following memory labels:
-    # Values: {", ".join(values)}
-    # """
-    return values
-
-
 conversation_style_guidelines = [
     "End responses naturally without forcing questions or next steps",
     "Be concise and direct; avoid unnecessary verbosity",
@@ -70,7 +48,6 @@ mcp_tool_usage_instructions = [
 
 def get_intuitive_knowledge():
     """Get INTUITIVE_KNOWLEDGE with lazy tools_manager initialization"""
-    tools_manager = get_tools_manager_lazy()
 
     return {
         "identity": """
@@ -89,15 +66,4 @@ def get_intuitive_knowledge():
                 "If you find yourself stuck, politely ask user for guidance, do not call anymore tools.",
             ],
         },
-        "available_memory_types": get_label_instructions(),
-        "available_actions": tools_manager.get_tools_schema(),
-        "output": {
-            "critical_format_rules": tools_manager.format_rules,
-            "format_name": tools_manager.format_name,
-            "output_format": tools_manager.output_format_instructions,
-            "output_examples": tools_manager.output_examples,
-        },
     }
-
-
-# INTUITIVE_KNOWLEDGE is now accessed via get_intuitive_knowledge() function

@@ -284,7 +284,7 @@ def append(path: str, content: str) -> Dict:
 
 
 @mcp_server.tool()
-def tree(path: str, max_depth: int = 3) -> Dict:
+def tree(path: str, max_depth: int = 1) -> Dict:
     """Visualize directory structure in a tree format
 
     Examples:
@@ -337,6 +337,9 @@ def tree(path: str, max_depth: int = 3) -> Dict:
         generate_tree(path, "", 0)
 
         tree_output = "\n".join(result)
+        if len(tree_output) > 2000:
+            return {"success": False, "message": f"Output too large. Try reducing max depth or search by specific patterns."}
+
         logger.info(f"Generated directory tree for {path} with max depth {max_depth}")
         return {"success": True, "message": f"Directory structure for {path} (max depth: {max_depth})", "tree": tree_output}
     except Exception as e:

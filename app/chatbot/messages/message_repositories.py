@@ -163,6 +163,41 @@ class MessageRepository(BaseRepository):
             page_size=page_size,
         )
 
+    async def fetch_all_paginated_by_user_id_and_conversation_id(
+        self, user_id: UUID, conversation_id: UUID, page: int = 1, page_size: int = MemoryManagementConfig.CONVERSATION_PAGE_SIZE
+    ) -> PaginatedResult[Message]:
+        total_count = self.session.query(MessageEntity).filter(MessageEntity.sender_id == user_id, MessageEntity.conversation_id == conversation_id).count()
+        stmt = (
+            select(MessageEntity)
+            .where(MessageEntity.sender_id == user_id, MessageEntity.conversation_id == conversation_id)
+            .order_by(MessageEntity.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+
+        entities = self.session.scalars(stmt).all()
+
+        return PaginatedResult(
+            results=[
+                Message(
+                    id=e.id,
+                    conversation_id=e.conversation_id,
+                    role=e.role,
+                    model_id=e.model_id,
+                    content=e.message,
+                    embedding=e.message_embedding,
+                    parent_message_id=e.parent_message_id,
+                    created_at=e.created_at,
+                    updated_at=e.updated_at,
+                )
+                for e in entities
+            ],
+            page=page,
+            total_pages=total_count // page_size,
+            total_count=total_count,
+            page_size=page_size,
+        )
+
     async def search_paginated_by_user_id_and_embeddings(self, user_id: UUID, embeddings: list[float], page: int = 1) -> PaginatedResult[MemoryEntry]:
         page_size = MemoryManagementConfig.MEMORY_SEARCH_PAGE_SIZE
         offset = (page - 1) * page_size

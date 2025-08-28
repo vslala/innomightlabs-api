@@ -1,4 +1,4 @@
-from collections import deque
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 import json
 from loguru import logger
@@ -9,7 +9,7 @@ from app.chatbot.components.conversation_manager import ConversationManager
 from app.chatbot.components.tools import conversation_search, mcp_tools, memory_tools_v3, python_code_runner, send_message
 from app.chatbot.components.tools_manager import ToolCategory, ToolsManager
 from app.chatbot.workflows.prompts.system.intuitive_knowledge import get_intuitive_knowledge
-from app.common.models import MemoryType, Role
+from app.common.models import MemoryBlock, MemoryManagementConfig, MemoryType, Role
 from app.common.utils import extract_tag_content, write_to_file
 from app.common.workflows import BaseWorkflowHelper
 
@@ -26,47 +26,68 @@ class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
         tools_manager.register_tool(ToolCategory.CORE, send_message)
         tools_manager.register_tool(ToolCategory.CODE, python_code_runner)
 
-    def _check_duplicate_tool_call(self, state: AgentState) -> bool:
-        """Check if the same tool is being called with identical parameters"""
-        import hashlib
-        import json
-
-        if not state.thought or not state.last_tool_call:
-            return False
-
-        current_tool = state.thought.action.name
-        current_params = json.dumps(state.thought.action.params, sort_keys=True)
-        current_hash = hashlib.md5(current_params.encode()).hexdigest()
-
-        last_tool, last_hash = state.last_tool_call
-        return current_tool == last_tool and current_hash == last_hash
-
     async def prompt_builder(self, state: AgentState) -> AgentState:
         """
         Build the prompt for the LLM with MemoryManagerV2 integration
         """
-        prompt = {
-            "system_prompt": {
-                "intuitive_knowledge": get_intuitive_knowledge(),
-                "available_memory_types": [label.value for label in MemoryType],
-                "available_actions": self.tools_manager.get_tools_schema(),
-                "output": {
-                    "critical_format_rules": self.tools_manager.format_rules,
-                    "format_name": self.tools_manager.format_name,
-                    "output_format": self.tools_manager.output_format_instructions,
-                    "output_examples": self.tools_manager.output_examples,
-                },
-            },
-            "current_time_in_utc": datetime.now(timezone.utc).isoformat(),
-            "archival_memory": [v.serialize() for k, v in state.memory_blocks.items()],
-            "recalled_memory": state.build_conversation_context(),
-            "conversation_history": [SingleMessage.from_message(m).model_dump_json() for m in await self.conversation_manager.get_messages(user=state.user)],
-            "heartbeats_used": state.epochs,
-            "current_user_query": state.user_message,
-        }
+        available_tools = defaultdict(list[dict])
+        for cat, actions in self.tools_manager.get_tools_schema().items():
+            available_tools[cat] = [item.model_dump() for item in actions]
 
-        if state.epochs > 10:
-            prompt.update({"CRITICAL": f"TOO MANY HEART BEATS USED (>{state.epochs}). RESPOND TO USER ASAP."})
+        prompt = [
+            MemoryBlock(
+                title="System Instructions",
+                type=MemoryType.SYSTEM,
+                size=MemoryManagementConfig.SYSTEM_INSTRUCTIONS_SIZE,
+                content=json.dumps(
+                    {
+                        "system_prompt": {
+                            "intuitive_knowledge": get_intuitive_knowledge(),
+                            "available_memory_types": [label.value for label in MemoryType],
+                            "available_actions": available_tools,
+                            "output": {
+                                "critical_format_rules": self.tools_manager.format_rules,
+                                "format_name": self.tools_manager.format_name,
+                                "output_format": self.tools_manager.output_format_instructions,
+                                "output_examples": self.tools_manager.output_examples,
+                            },
+                        },
+                        "current_time_in_utc": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            ).model_dump(),
+            MemoryBlock(
+                title="Working Context",
+                type=MemoryType.ARCHIVAL,
+                size=MemoryManagementConfig.WORKING_CONTEXT_SIZE,
+                content=json.dumps(
+                    {
+                        "archival_memory": [v.serialize() for k, v in state.memory_blocks.items()],
+                        "recalled_memory": state.build_conversation_context(),
+                    }
+                ),
+            ).model_dump(),
+            MemoryBlock(
+                title="Conversation History",
+                type=MemoryType.CONVERSATION_HISTORY,
+                size=MemoryManagementConfig.CONVERSATION_HISTORY_SIZE,
+                content=json.dumps(
+                    {
+                        "conversation_history": [
+                            SingleMessage.from_message(m).model_dump_json()
+                            for m in await self.conversation_manager.get_messages(user=state.user, conversation_id=state.conversation_id)
+                        ],
+                    }
+                ),
+            ).model_dump(),
+            {
+                "heartbeats_used": state.epochs,
+                "current_user_query": state.user_message,
+            },
+        ]
+
+        if state.epochs > 20:
+            prompt[-1].update({"CRITICAL": f"TOO MANY HEART BEATS USED (>{state.epochs}). RESPOND TO USER ASAP."})
 
         state.prompt = json.dumps(prompt, indent=2, default=str)
         logger.info(f"Prompt built for epoch {state.epochs}")
@@ -76,9 +97,21 @@ class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
         return state
 
     async def thinker(self, state: AgentState) -> AgentState:
+        import asyncio
+        from botocore.exceptions import EventStreamError
+
         plan_of_action = ""
-        async for chunk in self.chatbot.stream_response(prompt=state.prompt):
-            plan_of_action += str(chunk)
+        try:
+            async for chunk in self.chatbot.stream_response(prompt=state.prompt):
+                plan_of_action += str(chunk)
+        except EventStreamError as e:
+            if "throttlingException" in str(e):
+                logger.warning("Throttling exception encountered, waiting 10 seconds before retry")
+                await asyncio.sleep(10)
+                async for chunk in self.chatbot.stream_response(prompt=state.prompt):
+                    plan_of_action += str(chunk)
+            else:
+                raise
 
         state.llm_response = plan_of_action
         return state
@@ -130,7 +163,9 @@ class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
             logger.error(f"Validation failed: {e}. Retry: {state.retry}")
             logger.exception("Detailed exception info:")
             format_name = getattr(self.tools_manager, "format_name", "response")
-            await self.conversation_manager.append_message(SingleMessage(message=f"Validation failed while parsing your {format_name} response: {e}", role=Role.SYSTEM))
+            await self.conversation_manager.append_message(
+                conversation_id=state.conversation_id, message=SingleMessage(message=f"Validation failed while parsing your {format_name} response: {e}", role=Role.SYSTEM)
+            )
             raise ValueError(f"Validation failed while parsing your {format_name} response: {e}") from e
 
         return state
@@ -196,18 +231,14 @@ class KrishnaAdvanceWorkflowHelper(BaseWorkflowHelper):
                 await self.conversation_manager.append_message(conversation_id=state.conversation_id, message=SingleMessage(message=f"Error executing action: {e}", role=Role.USER))
                 break
 
-        logger.info(f"NEXT PHASE: {state.phase}")
-        return state
-
-    async def manage_conversations(self, state: AgentState) -> AgentState:
-        """Manage the conversation history"""
         await self.conversation_manager.handle_messages()
+        logger.info(f"NEXT PHASE: {state.phase}")
         return state
 
     async def error_handler(self, state: AgentState) -> AgentState:
         """Generate the final response based on the plan and user message"""
         # Limit conversation history to last 5 messages to avoid context overflow
-        messages = await self.conversation_manager.get_messages(user=state.user)
+        messages = await self.conversation_manager.get_messages(user=state.user, conversation_id=state.conversation_id)
         recent_messages = messages[-5:] if len(messages) > 5 else messages
         conversation_history = "\n".join([f"[{m.role.value}]: {m.content}" for m in recent_messages])
 

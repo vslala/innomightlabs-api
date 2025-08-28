@@ -3,7 +3,7 @@ import io
 import json
 import os
 import tempfile
-from typing import Optional
+from typing import Literal, Optional
 import aiohttp
 from bs4 import BeautifulSoup
 from loguru import logger
@@ -269,3 +269,37 @@ async def conversation_search(state: AgentState, input: ConversationSearchParams
     state.recall_paginated_result = paginated_result
     result_msg = "Older conversation loaded into working context"
     return ActionResult(thought="", action="conversation_search", result=result_msg)
+
+
+todo_list = []
+
+
+class TodoItem(BaseModel):
+    id: str
+    task: str
+    status: Literal["pending", "completed", "inprogress"]
+
+
+@tool("create_task", description="Adds a new todo item to the todo list with your provided ID", args_schema=TodoItem, return_direct=True)
+async def create_task(state: AgentState, input: TodoItem) -> ActionResult:
+    """
+    Add a new todo item to the todo list.
+    """
+    todo_list.append(input)
+    return ActionResult(thought="", action="todo_add", result=f"Plan: {json.dumps(todo_list)}")
+
+
+@tool("list_tasks", description="Returns the current todo list", return_direct=True)
+async def list_todos(state: AgentState) -> ActionResult:
+    """
+    Returns the current todo list.
+    """
+    return ActionResult(thought="", action="todo_list", result=f"Plan: {json.dumps(todo_list)}")
+
+
+@tool("complete_task", description="Mark the task complete once it is done", return_direct=True)
+async def change_status(state: AgentState) -> ActionResult:
+    """
+    Returns the current todo list.
+    """
+    return ActionResult(thought="", action="todo_list", result=f"Plan: {json.dumps(todo_list)}")

@@ -41,11 +41,6 @@ class BaseWorkflowHelper(ABC):
         pass
 
     @abstractmethod
-    async def manage_conversations(self, state: AgentState) -> AgentState:
-        """Manage conversations."""
-        pass
-
-    @abstractmethod
     async def persist_message_exchange(self, state: AgentState) -> AgentState:
         """Persist the message exchange."""
         pass

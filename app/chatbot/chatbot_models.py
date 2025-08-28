@@ -57,20 +57,8 @@ class MemoryEntry(BaseModel):
     def serialize(self) -> dict[str, Any]:
         """Serialize the memory block with usage statistics and alerts"""
         content = self.content
-        token_limit = self.memory_type.token_limit
-        char_limit = token_limit * MemoryManagementConfig.AVERAGE_TOKEN_SIZE
         current_chars = len(content)
-        current_tokens = current_chars / MemoryManagementConfig.AVERAGE_TOKEN_SIZE
-
-        usage_pct = (current_tokens / token_limit * 100) if token_limit > 0 else 0
-
-        if current_tokens > token_limit:
-            content = content[-char_limit:]
-
-        # Alert if usage >= 70%
-        alert = " ⚠️ CLEAN NEEDED" if usage_pct >= 70 else ""
-
-        header = f"\n[{self.memory_type.value.upper()} | {current_chars} chars | {current_tokens:.0f}/{token_limit} tokens ({usage_pct:.1f}%){alert}]\n"
+        header = f"\n[{self.memory_type.value.upper()} | {current_chars} chars]\n"
         return {
             "header": header,
             "id": str(self.id),

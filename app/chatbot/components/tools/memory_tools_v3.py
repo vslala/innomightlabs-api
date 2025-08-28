@@ -87,12 +87,6 @@ class MemoryEvictParams(BaseModel):
     text: str
 
 
-class MemoryReadParams(BaseModel):
-    memory_type: str
-    query: str
-    page: int = Field(default=1)
-
-
 @tool(
     "memory_evict",
     description="Remove specific text from a memory page. Specify the page number to target.",
@@ -116,6 +110,12 @@ async def memory_evict(state: AgentState, input: MemoryEvictParams) -> ActionRes
         return ActionResult(thought="Error evicting text from memory page", action="memory_evict", result=str(e))
 
 
+class MemoryReadParams(BaseModel):
+    memory_type: str
+    query: str
+    page: int = Field(default=1)
+
+
 @tool(
     "memory_read",
     description="Search and read memory pages by semantic similarity. Returns the most relevant page for the query.",
@@ -131,17 +131,16 @@ async def memory_read(state: AgentState, input: MemoryReadParams) -> ActionResul
         if not result.results:
             return ActionResult(thought="No memory found", action="memory_read", result=f"No memory blocks found for type '{memory_type.value}'")
 
-        # for entry in result.results:
-        #     if entry.memory_type in state.memory_blocks:
-        #         state.memory_blocks[entry.memory_type.value].append("\n" + entry.content)
-        #     else:
-        #         state.memory_blocks[entry.memory_type.value] = entry
+        for entry in result.results:
+            if entry.memory_type in state.memory_blocks:
+                state.memory_blocks[entry.memory_type.value].append("\n" + entry.content)
+            else:
+                state.memory_blocks[entry.memory_type.value] = entry
 
-        memory_content = result.results[0].content
         return ActionResult(
             thought="Retrieved memory page",
             action="memory_read",
-            result=f"Memory '{memory_type.value}' page {result.page}/{result.total_pages} (tokens: {result.total_count}): {memory_content}",
+            result=f"Memory '{memory_type.value}' page {result.page}/{result.total_pages} loaded into the working context.",
         )
     except ValueError as e:
         return ActionResult(thought="Memory page not found", action="memory_read", result=str(e))

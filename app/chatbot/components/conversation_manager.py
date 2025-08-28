@@ -32,7 +32,7 @@ class ConversationManager(ABC):
         pass
 
     @abstractmethod
-    async def get_messages(self, user: User) -> list[Message]:
+    async def get_messages(self, user: User, conversation_id: UUID) -> list[Message]:
         """
         Get all messages from the conversation
         """
@@ -84,14 +84,14 @@ class SlidingWindowConversationManager(ConversationManager):
         """
 
         if len(self.session_messages) > self.window_size:
-            self.stored_messages = self.session_messages[-self.window_size :]
+            self.session_messages = self.session_messages[-self.window_size :]
 
-    async def get_messages(self, user: User) -> list[Message]:
+    async def get_messages(self, user: User, conversation_id: UUID) -> list[Message]:
         """
         Get all messages from the conversation
         """
         if not self.session_messages:
-            result = await self.message_repository.fetch_all_paginated_by_user_id(user_id=user.id)
+            result = await self.message_repository.fetch_all_paginated_by_user_id_and_conversation_id(user_id=user.id, conversation_id=conversation_id)
             self.session_messages = result.results
 
         return sorted(self.session_messages, key=lambda x: x.created_at)

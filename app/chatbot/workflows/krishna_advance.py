@@ -59,7 +59,6 @@ class KrishnaAdvanceWorkflow(BaseAgentWorkflow):
         graph.add_node("parse_actions", helper.parse_actions)
         graph.add_node("execute_actions", helper.execute_actions)
         graph.add_node("router", self._router)
-        graph.add_node("manage_conversations", helper.manage_conversations)
         graph.add_node("persist_message_exchange", helper.persist_message_exchange)
         graph.add_node("error_handler", helper.error_handler)
 
